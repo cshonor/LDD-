@@ -1,0 +1,215 @@
+# MODULE_LICENSE / taint / GPL-only 符号 —— 真机对照实验记录
+
+- 测试机：树莓派 5（aarch64），Debian 13 trixie，内核 `6.18.34+rpt-rpi-2712`
+- 编译器：gcc (Debian 14.2.0-19)，kbuild 来自 `linux-headers-6.18.34+rpt-rpi-2712`
+- 以下所有输出均为在该机器上实际执行所得，未做修饰。
+
+==============================================================================
+实验一：不写 MODULE_LICENSE 会怎样？
+==============================================================================
+
+```console
+$ make MOD=nolic
+make -C /lib/modules/6.18.34+rpt-rpi-2712/build M=/home/wzp/linux-device/01-first/experiments/license-taint modules
+make[1]: Entering directory '/usr/src/linux-headers-6.18.34+rpt-rpi-2712'
+make[2]: Entering directory '/home/wzp/linux-device/01-first/experiments/license-taint'
+  CC [M]  nolic.o
+  MODPOST Module.symvers
+ERROR: modpost: missing MODULE_LICENSE() in nolic.o
+make[4]: *** [/usr/src/linux-headers-6.18.34+rpt-common-rpi/scripts/Makefile.modpost:147: Module.symvers] Error 1
+make[3]: *** [/usr/src/linux-headers-6.18.34+rpt-common-rpi/Makefile:2000: modpost] Error 2
+make[2]: *** [/usr/src/linux-headers-6.18.34+rpt-common-rpi/Makefile:260: __sub-make] Error 2
+make[2]: Leaving directory '/home/wzp/linux-device/01-first/experiments/license-taint'
+make[1]: *** [/usr/src/linux-headers-6.18.34+rpt-common-rpi/Makefile:260: __sub-make] Error 2
+make[1]: Leaving directory '/usr/src/linux-headers-6.18.34+rpt-rpi-2712'
+make: *** [Makefile:16: all] Error 2
+
+$ ls nolic.ko     # → NO（根本没生成）
+```
+
+**结论**：在 6.18 上，缺少 `MODULE_LICENSE` 是 **ERROR 而不是 WARNING** ——
+modpost 直接终止构建，`.ko` 根本不会产生。
+
+| 内核版本 | 行为 |
+|---|---|
+| < v4.14 | 不检查 |
+| v4.14 ~ v5.15 | `WARNING: modpost: missing MODULE_LICENSE()`，照样出 `.ko`，加载时报 taint |
+| **≥ v5.16** | **`ERROR: modpost: missing MODULE_LICENSE()`，构建失败** |
+
+变更点：`commit 1d6cd3929360` *modpost: turn missing MODULE_LICENSE() into error*（2021-11，v5.16）。
+
+> 补充：`KBUILD_MODPOST_WARN=1` **绕不过**这条检查。该开关只作用于「缺 vmlinux /
+> `Module.symvers`」那类警告，不覆盖 license（已实测，同样 ERROR 失败）。
+
+==============================================================================
+实验二：out-of-tree taint 与 license taint 是两回事
+==============================================================================
+
+用同一个 `taint.tmpl.c`，只改许可证字符串，加载后看 dmesg。
+（每次加载前先 `sudo dmesg -c` 清空环形缓冲区，保证日志干净）
+
+### MODULE_LICENSE("GPL")
+```console
+$ make MOD=taint
+CC [M]  taint.o
+  CC [M]  taint.mod.o
+  CC [M]  .module-common.o
+  LD [M]  taint.ko
+
+$ sudo dmesg -c            # 清空缓冲区
+$ sudo insmod taint.ko
+$ sudo dmesg
+[ 3397.709808] Taint: loaded with license "GPL"
+
+$ cat /proc/sys/kernel/tainted
+4097
+```
+
+### MODULE_LICENSE("Proprietary")
+```console
+$ make MOD=taint
+CC [M]  taint.o
+  CC [M]  taint.mod.o
+  CC [M]  .module-common.o
+  LD [M]  taint.ko
+
+$ sudo dmesg -c            # 清空缓冲区
+$ sudo insmod taint.ko
+$ sudo dmesg
+[ 3399.866965] Taint: loaded with license "Proprietary"
+
+$ cat /proc/sys/kernel/tainted
+4097
+```
+
+**读法**：`/proc/sys/kernel/tainted` 是个位图
+
+| 位 | 值 | 含义 |
+|---|---|---|
+| bit 0 | 1 | `TAINT_PROPRIETARY_MODULE` —— 非自由许可证 |
+| bit 12 | 4096 | `TAINT_OOT_MODULE` —— 树外模块（out-of-tree） |
+
+#### ⚠️ 上面这轮为什么两次都是 4097，而且没看到 taint 文案？
+
+因为 **taint 有两个"一次性"特性**（都是实测撞出来的）：
+
+1. **粘性**：taint 位一旦置上，`rmmod` 不会清零，只有重启才回到 0。
+   本轮开始时该值已经是 4097（前面测试留下的）。
+2. **每次开机只报一次**：内核打印 taint 文案的代码带 `if (!test_taint(...))` 守卫，
+   位已经置上就不再重复打印 —— 所以第二次加载同类模块时日志里干干净净。
+
+**想复现下面的干净对照，必须重启后再跑。**
+
+#### 首次触发时抓到的真实日志
+
+下面两段是这台机器在两个 taint 位都还是 0 的时候，**第一次**加载树外模块、
+以及**第一次**加载 Proprietary 模块的原始 dmesg：
+
+```console
+# ① 加载 hello.ko（MODULE_LICENSE("GPL")，但属树外模块）
+$ sudo insmod hello.ko && sudo dmesg | tail -2
+[ 1225.915684] hello: loading out-of-tree module taints kernel.
+[ 1225.915712] Hello: Hello, Kernel
+
+$ cat /proc/sys/kernel/tainted
+4096                      # 只有 bit12
+```
+
+```console
+# ② 换成 MODULE_LICENSE("Proprietary") 再加载
+$ sudo insmod nolic.ko && sudo dmesg | tail -4
+[ 2855.363168] nolic: module license 'Proprietary' taints kernel.
+[ 2855.363181] Disabling lock debugging due to kernel taint
+[ 2855.363187] nolic: module license taints kernel.
+[ 2855.363404] Nolic: loaded (no MODULE_LICENSE declared)
+
+$ cat /proc/sys/kernel/tainted
+4097                      # 4096 + 1 = bit12 + bit0
+```
+
+**这就是核心结论**：
+
+- `01-first/hello.c` 明明写了 `MODULE_LICENSE("GPL")`，加载时却**依然**打印
+  `hello: loading out-of-tree module taints kernel.` —— 那是 **bit 12（树外）**，
+  **和许可证无关**。写 GPL 也躲不掉，属于正常现象，不是错误。
+- 只有 **bit 0** 才是许可证引起的污染，对应 `module license 'Proprietary' taints kernel.`。
+  顺带还会看到 `Disabling lock debugging due to kernel taint` —— 内核一旦被污染，
+  lockdep 等调试设施会被自动关掉。这是 taint 的**实际副作用**，不只是"免责声明"。
+
+==============================================================================
+实验三：许可证字符串决定你能调用哪些内核函数
+==============================================================================
+
+本机内核导出符号统计（`Module.symvers`）：
+```
+10989 EXPORT_SYMBOL_GPL
+   8199 EXPORT_SYMBOL
+```
+
+共 19188 个导出符号，其中 **10989 个（57%）是 `EXPORT_SYMBOL_GPL`** ——
+非 GPL 兼容的模块**一个都用不了**。
+
+测试代码只引用 `pm_power_off`（`<linux/pm.h>` 声明，`EXPORT_SYMBOL_GPL` 导出），
+然后只改 `MODULE_LICENSE` 字符串：
+
+| `MODULE_LICENSE(...)` | 结果 |
+|---|---|
+| `"GPL"` | ✅ 构建成功（允许用） |
+| `"GPL v2"` | ✅ 构建成功（允许用） |
+| `"GPL and additional rights"` | ✅ 构建成功（允许用） |
+| `"Dual BSD/GPL"` | ✅ 构建成功（允许用） |
+| `"Dual MIT/GPL"` | ✅ 构建成功（允许用） |
+| `"Dual MPL/GPL"` | ✅ 构建成功（允许用） |
+| `"GPL v2 or later"` | ❌ 被 modpost 拒绝 |
+| `"GPLv2"` | ❌ 被 modpost 拒绝 |
+| `"Proprietary"` | ❌ 被 modpost 拒绝 |
+
+被拒绝时的完整报错：
+
+```
+ERROR: modpost: GPL-incompatible module gplonly.ko uses GPL-only symbol 'pm_power_off'
+```
+
+**内核认定「GPL 兼容」的字符串只有 6 个**，判定函数在
+`include/linux/license.h` → `license_is_gpl_compatible()`：
+
+```c
+/* SPDX-License-Identifier: GPL-2.0-only */
+#ifndef __LICENSE_H
+#define __LICENSE_H
+
+static inline int license_is_gpl_compatible(const char *license)
+{
+	return (strcmp(license, "GPL") == 0
+		|| strcmp(license, "GPL v2") == 0
+		|| strcmp(license, "GPL and additional rights") == 0
+		|| strcmp(license, "Dual BSD/GPL") == 0
+		|| strcmp(license, "Dual MIT/GPL") == 0
+		|| strcmp(license, "Dual MPL/GPL") == 0);
+}
+
+#endif
+```
+
+> ⚠️ **高频踩坑**：`"GPL v2 or later"` 和 `"GPLv2"` **都不在这 6 个里**。
+> 平时看不出问题（只是多个 taint），一旦用到 GPL-only 符号，构建直接失败。
+> 写 `"GPL"` 或 `"GPL v2"` 最保险。
+
+==============================================================================
+附：这些宏到底展开成什么
+==============================================================================
+
+`MODULE_AUTHOR` / `MODULE_DESCRIPTION` / `MODULE_LICENSE` / `MODULE_VERSION`
+全部是 `MODULE_INFO` 的包装（`include/linux/module.h`）：
+
+```c
+236:#define MODULE_LICENSE(_license) MODULE_FILE MODULE_INFO(license, _license)
+242:#define MODULE_AUTHOR(_author) MODULE_INFO(author, _author)
+245:#define MODULE_DESCRIPTION(_description) MODULE_INFO(description, _description)
+282:#define MODULE_VERSION(_version) MODULE_INFO(version, _version)
+284:#define MODULE_VERSION(_version)					\
+```
+
+`MODULE_INFO` 把 `key=value` 写进 ELF 的 **`.modinfo` 段**，`modinfo` 就是读这个段。
+注意 `MODULE_LICENSE` 展开里还带了个 `MODULE_FILE`（记录构建时的文件路径）。
+

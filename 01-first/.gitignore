@@ -16,3 +16,8 @@ modules.order
 !prebuilt/*.ko
 !prebuilt/*.log
 !prebuilt/*.txt
+
+# 实验目录：由 *.tmpl.c 模板 + sed 生成的源码，属于中间产物，不入库
+experiments/**/*.c
+!experiments/**/*.tmpl.c
+!experiments/**/nolic.c

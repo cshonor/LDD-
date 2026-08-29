@@ -56,6 +56,7 @@ ls -l /lib/modules/$(uname -r)/build      # 检查内核构建树是否存在（
 | `prebuilt/hello.ko` | 真机编译产物（含 vermagic，可 `modinfo` 核对） | ✅ 有意提交 |
 | `prebuilt/build.log` | `make` 完整输出 | ✅ |
 | `prebuilt/modinfo.txt` | `modinfo hello.ko` 输出 | ✅ |
+| `experiments/license-taint/` | `MODULE_LICENSE` / taint / GPL-only 符号的对照实验 | ✅ |
 | `*.o` `*.mod.c` `Module.symvers` 等 | 中间产物 | ❌ 忽略 |
 
 ---
@@ -106,21 +107,131 @@ MODULE_LICENSE("GPL");                      /* ③ 元信息 */
 这不是运行时的函数调用，是**链接期布局 + 加载期查表**。
 同理，`MODULE_LICENSE` 等元信息也会被塞进 `.modinfo` 段，`modinfo` 命令就是从那儿读的。
 
-### 3.5 为什么必须写 `MODULE_LICENSE`
+### 3.5 `MODULE_LICENSE` —— 唯一一个"不纯粹"的元信息
 
-| 写法 | 后果 |
-|------|------|
-| `MODULE_LICENSE("GPL")` | 可正常使用所有内核导出符号 |
-| 不写 / 写 `"Proprietary"` | 内核标记 **taint（污染）**，`EXPORT_SYMBOL_GPL` 导出的符号**用不了** |
+常见说法（包括不少教程）："这些 `MODULE_xxx` 都只是描述信息，内核不做逻辑判断。"
+**这句话只对一半。**
 
-taint 是内核的"免责声明"：这个系统里跑着非自由模块，出了 bug 内核开发者不负责。
-我们这个模块虽然是 GPL，但因为不在内核源码树里，加载时仍会看到：
+| 宏 | 内核会拿它做判断吗 |
+|---|---|
+| `MODULE_AUTHOR` | ❌ 纯描述 |
+| `MODULE_DESCRIPTION` | ❌ 纯描述 |
+| `MODULE_VERSION` | ❌ 纯描述（`modinfo` 可查，仅此而已） |
+| **`MODULE_LICENSE`** | ✅ **会被解析，且决定你能调用哪些内核函数** |
 
+内核导出的符号分两类：
+
+| 导出方式 | 谁能用 | 本机数量 |
+|---|---|---|
+| `EXPORT_SYMBOL` | 任何模块 | 8199 |
+| `EXPORT_SYMBOL_GPL` | **只有 GPL 兼容许可证的模块** | **10989（占 57%）** |
+
+实测：同一份代码，只引用一个 GPL-only 符号 `pm_power_off`，只改许可证字符串——
+
+```console
+MODULE_LICENSE("GPL")           → ✅ 构建成功
+MODULE_LICENSE("Proprietary")   → ❌ ERROR: modpost: GPL-incompatible module
+                                    gplonly.ko uses GPL-only symbol 'pm_power_off'
 ```
-hello: loading out-of-tree module taints kernel.
+
+这不是"少几个函数"的问题——本机 19188 个导出符号里 **10989 个你碰不到**。
+
+> ⚠️ **高频坑**：内核只认下面 6 个字符串（`include/linux/license.h` →
+> `license_is_gpl_compatible()`），多一个空格、少一个空格都算不认识：
+>
+> ```
+> "GPL"    "GPL v2"    "GPL and additional rights"
+> "Dual BSD/GPL"    "Dual MIT/GPL"    "Dual MPL/GPL"
+> ```
+>
+> **`"GPL v2 or later"` 和 `"GPLv2"` 都不在里面**（实测被 modpost 拒绝）。
+> 平时看不出问题，一旦用到 GPL-only 符号就炸。**就写 `"GPL"`。**
+
+### 不写 `MODULE_LICENSE` 会怎样？（版本敏感）
+
+| 内核版本 | 行为 |
+|---|---|
+| < v4.14 | 不检查 |
+| v4.14 ~ v5.15 | `WARNING: modpost: missing MODULE_LICENSE()`，照样出 `.ko`，加载时报 taint |
+| **≥ v5.16** | **`ERROR: modpost: missing MODULE_LICENSE()`，构建失败，`.ko` 根本不生成** |
+
+变更点：`commit 1d6cd3929360` *modpost: turn missing MODULE_LICENSE() into error*（2021-11，v5.16）。
+
+> `KBUILD_MODPOST_WARN=1` **绕不过**这条检查。那个开关只作用于「缺 vmlinux /
+> `Module.symvers`」这类警告，不覆盖 license（已实测，同样 ERROR 失败）。
+
+### taint：out-of-tree 和 license 是两码事
+
+`/proc/sys/kernel/tainted` 是个位图：
+
+| 位 | 值 | 含义 |
+|---|---|---|
+| bit 0 | 1 | `TAINT_PROPRIETARY_MODULE` —— 非自由许可证 |
+| bit 12 | 4096 | `TAINT_OOT_MODULE` —— 树外模块（out-of-tree） |
+
+- 我们的 `hello.c` 明明写了 `"GPL"`，加载时**依然**会看到
+  `hello: loading out-of-tree module taints kernel.` —— 那是 **bit 12**，
+  **跟许可证无关，写 GPL 也躲不掉**，正常现象，不是错误。
+- 只有 **bit 0** 才是许可证引起的污染，文案是
+  `module license 'Proprietary' taints kernel.`，并附带
+  `Disabling lock debugging due to kernel taint` —— 内核被污染后 **lockdep 会被自动关掉**。
+  这是 taint 的**实际副作用**，不只是"内核开发者不负责"的免责声明。
+
+> ⚠️ taint 是**粘性**的：`rmmod` 不清零，只有重启才回到 0；
+> 而且文案**每次开机只打印一次**（打印处有 `if (!test_taint(...))` 守卫）。
+> 想复现干净的对照实验必须重启。详见 [`experiments/license-taint/`](./experiments/license-taint/)。
+
+---
+
+### 3.6 元信息宏：写在哪、展开成什么、怎么看
+
+这几个宏**习惯上放在 `.c` 文件末尾**（`module_init` / `module_exit` 之后），
+不影响程序逻辑，只往 `.ko` 里塞说明信息。
+
+```c
+/* 真正的入口/出口 —— 控制代码执行 */
+module_init(my_init);
+module_exit(my_exit);
+
+/* 元信息 —— 纯描述（LICENSE 除外，见 3.5） */
+MODULE_AUTHOR("wzp");
+MODULE_DESCRIPTION("First kernel module: print hello/goodbye on load/unload");
+MODULE_VERSION("0.1");
+MODULE_LICENSE("GPL");
 ```
 
-**这是正常的**，不是错误。
+它们全是 `MODULE_INFO` 的包装（`include/linux/module.h` 实测）：
+
+```c
+#define MODULE_LICENSE(_license)       MODULE_FILE MODULE_INFO(license, _license)
+#define MODULE_AUTHOR(_author)         MODULE_INFO(author, _author)
+#define MODULE_DESCRIPTION(_descr)     MODULE_INFO(description, _descr)
+#define MODULE_VERSION(_version)       MODULE_INFO(version, _version)
+```
+
+`MODULE_INFO` 把 `key=value` 以字符串形式写进 ELF 的 **`.modinfo` 段**，
+所以 `modinfo` 能读出来（它不加载模块，只是读 ELF 段）：
+
+```console
+$ modinfo hello.ko
+version:        0.1
+description:    First kernel module: print hello/goodbye on load/unload
+author:         wzp
+license:        GPL
+```
+
+> 注意 `MODULE_LICENSE` 展开时还带了个 `MODULE_FILE`——它额外记录构建时的源文件路径。
+> 这也是它"不纯粹"的一个侧面。
+
+| 宏 | 写不写 | 缺了会怎样 |
+|---|---|---|
+| `MODULE_LICENSE` | **必须** | ≥5.16 构建失败；更早只是 taint |
+| `MODULE_DESCRIPTION` | 强烈建议 | 内核 6.x 的 modpost 会 `WARNING: modpost: missing MODULE_DESCRIPTION()` |
+| `MODULE_AUTHOR` | 建议 | 同上警告 |
+| `MODULE_VERSION` | 可选 | 无警告，但 `modinfo` 里没有版本信息 |
+
+> **Debian / 树莓派 OS 上的小坑**：`modinfo` 在 `/sbin`，普通用户的 `PATH` 里没有。
+> 直接敲 `modinfo` 会 `command not found`，用 `/sbin/modinfo` 或 `sudo modinfo`。
 
 ---
 
@@ -247,13 +358,17 @@ vermagic:       6.18.34+rpt-rpi-2712 SMP preempt mod_unload modversions aarch64
 | 2 | `insmod: ERROR: could not insert module: Invalid module format` | vermagic 与运行内核不匹配（头文件版本 ≠ 运行内核版本） | 用 `uname -r` 核对，装对应版本的 headers 重新编译 |
 | 3 | `dmesg` 什么都没有 | ① 权限：Debian 系默认 `kernel.dmesg_restrict=1`，普通用户读不了<br>② 日志被刷掉了 <br>③ 级别低于 console_loglevel（但 dmesg 仍应可见） | 用 `sudo dmesg`；用 `dmesg -w` 实时跟踪 |
 | 4 | `WARNING: modpost: missing MODULE_DESCRIPTION()` | 缺 `MODULE_DESCRIPTION` / `MODULE_AUTHOR` | 补上即可（本目录已补） |
-| 5 | `hello: loading out-of-tree module taints kernel.` | 外部模块的正常提示，**不是错误** | 忽略 |
+| 5 | `hello: loading out-of-tree module taints kernel.` | 外部模块的正常提示，**不是错误**（bit 12，与许可证无关） | 忽略，见 3.5 |
 | 6 | `rmmod: ERROR: Module hello is in use` | 还有人在用它（引用计数非 0，比如被打开的设备节点） | 先关掉使用者；别硬来 |
 | 7 | `rmmod hello.ko` 报找不到模块 | `rmmod` 用的是**模块名** | `rmmod hello` |
 | 8 | 编译报 `printf`/`malloc` 未定义 | 内核里**没有 libc** | `printf`→`printk`/`pr_info`，`malloc`→`kmalloc`（`#include <linux/slab.h>`） |
 | 9 | 模块一加载系统就卡死/重启 | 内核态没有内存保护，野指针 = oops 甚至 panic | 用虚拟机或树莓派练手；善用 `dmesg` 看 oops 栈 |
 | 10 | 教程代码在你机器上编不过 | 内核 API 变动很快（`file_operations`、定时器、proc 接口都改过） | 查你内核版本对应的头文件，**以源码为准** |
 | 11 | 在 Windows 上写/克隆的代码，传到 Linux 编译报 `missing separator` 或 `$'\r': command not found` | 行尾被 git 转成了 CRLF，`\r` 变成命令的一部分 | 仓库根目录的 `.gitattributes` 已用 `* text=auto eol=lf` 锁死 LF，检出即 LF |
+| 12 | `ERROR: modpost: missing MODULE_LICENSE() in xxx.o`，`.ko` 没生成 | ≥ v5.16 起这是**硬错误**，不是警告 | 补 `MODULE_LICENSE("GPL")`；`KBUILD_MODPOST_WARN=1` 绕不过去 |
+| 13 | `ERROR: modpost: GPL-incompatible module xxx.ko uses GPL-only symbol 'yyy'` | 许可证字符串不在内核认可的 6 个里 | 见 3.5。**`"GPL v2 or later"` 和 `"GPLv2"` 都不合法** |
+| 14 | `modinfo: command not found` | `modinfo` 在 `/sbin`，不在普通用户 `PATH` | 用 `/sbin/modinfo` 或 `sudo modinfo` |
+| 15 | 换了许可证重新加载，dmesg 里却看不到 taint 文案 | taint 位**粘性**（`rmmod` 不清零）+ 文案**每开机只打印一次** | 重启后再测 |
 
 ### 内核空间 vs 用户空间（务必分清）
 
@@ -324,6 +439,24 @@ vermagic:       6.18.34+rpt-rpi-2712 SMP preempt mod_unload modversions aarch64
 **Q7. 加载时看到 `taints kernel` 是出错了吗？**
 > 不是。只是说明你加载了内核源码树之外的模块。GPL 许可证声明解决的是"能否使用 GPL-only 符号"，
 > 与 out-of-tree 的 taint 是两回事。
+
+**Q8. `MODULE_AUTHOR` 和 `MODULE_LICENSE` 都是元信息，性质一样吗？**
+> 不一样，这是常见误区。
+> `AUTHOR` / `DESCRIPTION` / `VERSION` 内核从不解析，纯给人看。
+> 但 `MODULE_LICENSE` 会被内核解析成 `license_gplok`，**决定你能不能用 `EXPORT_SYMBOL_GPL`
+> 导出的符号**——本机 19188 个导出符号里有 10989 个是 GPL-only。
+> 而且从 v5.16 起，不写它连编译都过不去。
+
+**Q9. 我写了 `MODULE_LICENSE("GPL v2 or later")`，为什么用到某个内核函数就编译失败了？**
+> 因为内核只认 6 个字符串，`"GPL v2 or later"` 不在其中（`"GPLv2"` 也不在）。
+> 它被当作非 GPL 兼容模块，一碰 GPL-only 符号 modpost 就报错：
+> `ERROR: modpost: GPL-incompatible module xxx.ko uses GPL-only symbol 'yyy'`
+> 改成 `"GPL"` 或 `"GPL v2"` 即可。
+
+**Q10. `/proc/sys/kernel/tainted` 显示 4097，是什么意思？**
+> 位图：`4096(bit 12, TAINT_OOT_MODULE) + 1(bit 0, TAINT_PROPRIETARY_MODULE)`。
+> 说明系统加载过树外模块，且其中至少有一个是非自由许可证。
+> `rmmod` 不会让这个值降回去，只有重启才会归零。
 
 </details>
 
