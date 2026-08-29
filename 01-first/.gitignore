@@ -1,0 +1,18 @@
+# 内核模块编译产物（中间文件不入库）
+*.o
+*.ko
+*.mod
+*.mod.c
+*.mod.o
+Module.symvers
+modules.order
+.tmp_versions/
+
+# 例外：prebuilt/ 存放「真机验证过」的构建产物，需要纳入版本管理。
+# 作用：记录这个模块确实能在 6.18.34+rpt-rpi-2712 (aarch64) 上编译并加载成功，
+#      换机器/换内核时可以用 modinfo 对比 vermagic 判断能否直接复用。
+# 注意：gitignore 的规则是「后写的覆盖先写的」，所以例外必须放在忽略规则之后。
+!prebuilt/
+!prebuilt/*.ko
+!prebuilt/*.log
+!prebuilt/*.txt

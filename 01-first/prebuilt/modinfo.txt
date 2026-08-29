@@ -1,0 +1,9 @@
+filename:       /home/wzp/linux-device/01-first/hello.ko
+version:        0.1
+description:    First kernel module: print hello/goodbye on load/unload
+author:         wzp
+license:        GPL
+srcversion:     9AF75F930CC4D9AF5776776
+depends:        
+name:           hello
+vermagic:       6.18.34+rpt-rpi-2712 SMP preempt mod_unload modversions aarch64
