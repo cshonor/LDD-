@@ -69,7 +69,94 @@ printk(KERN_INFO, "log_levels: Hello, Kernel\n");   /* ❌ 多写了逗号 */
 
 展开后变成 `printk("<6>", "...")`，第一个参数变成了格式字符串 `"<6>"`，第二个参数被当成一个参数但格式串里没占位符——编译能过，但打印出来的不是你想要的内容。
 
-### 1.3 控制台级别 vs dmesg
+### 1.3 `pr_*` 快捷宏：两层宏 + 一次拼接
+
+本节代码里同时出现了两种写法：前 8 行用完整的 `printk(KERN_xxx "...")`，
+头尾用 `pr_info("...")`。后者不是新函数，而是**两层宏嵌套展开**的结果。
+
+内核里的定义（简化自 `include/linux/printk.h` 和 `include/linux/kern_levels.h`）：
+
+```c
+/* printk.h */
+#define pr_info(fmt, ...)   printk(KERN_INFO    pr_fmt(fmt), ##__VA_ARGS__)
+#define pr_err(fmt, ...)    printk(KERN_ERR     pr_fmt(fmt), ##__VA_ARGS__)
+#define pr_warn(fmt, ...)   printk(KERN_WARNING pr_fmt(fmt), ##__VA_ARGS__)
+
+/* printk.h，默认模板：原样返回 */
+#ifndef pr_fmt
+#define pr_fmt(fmt) fmt
+#endif
+
+/* kern_levels.h，字符串常量，不是变量 */
+#define KERN_SOH   "\001"
+#define KERN_INFO  KERN_SOH "6"      /* 展开为 "\0016"，等价于老写法 "<6>" */
+```
+
+`pr_info("log_levels: module loaded\n")` 在编译器眼里经历的过程：
+
+```
+你写的源码
+    pr_info("log_levels: module loaded\n")
+        │  ① pr_info 是带参数的宏（function-like macro）
+        │     预处理器把 fmt 替换成实参，纯文本粘贴
+        ▼
+    printk(KERN_INFO pr_fmt("log_levels: module loaded\n"))
+        │  ② pr_fmt 默认模板：原样返回
+        ▼
+    printk(KERN_INFO "log_levels: module loaded\n")
+        │  ③ KERN_INFO 是对象式宏，替换成字符串常量
+        ▼
+    printk("\0016" "log_levels: module loaded\n")
+        │  ④ C 语言相邻字符串字面量自动拼接（编译期行为）
+        ▼
+    printk("\0016log_levels: module loaded\n")
+        │  ⑤ 编译完成，.rodata 里只有这一条完整字符串
+        ▼
+    运行时：printk 扫描开头 \001+数字，剥出来当本条消息的日志级别
+```
+
+三个关键认知：
+
+1. **"模板"就是带参数的宏**。`fmt` 是占位符，预处理器在编译期做纯文本替换，
+   不存在运行时的模板机制，零开销。
+2. **`KERN_xxx` 是字符串常量，不是变量**。`#define KERN_INFO "<6>"` 定义的是
+   宏，展开后是字符串字面量，直接进 `.rodata`。
+3. **整套设计靠两个 C 语言特性撑着**：宏展开（翻译阶段 4）+ 相邻字符串拼接。
+   这也是 1.2 节"逗号坑"的根源——加逗号就破坏了第 ④ 步的拼接前提。
+
+#### `##__VA_ARGS__` 是什么
+
+`__VA_ARGS__` 代表 `...` 收到的所有实参。前面的 `##` 是 GNU 扩展：
+当没传可变参数时，把 `##` 前面那个**多余的逗号吃掉**。
+没有它，`pr_info("hi")` 会展开成 `printk(fmt, )`，直接编不过。
+
+#### `pr_fmt`：自动加模块名前缀的正确姿势
+
+本节每条消息手写了 `log_levels:` 前缀（为了 dmesg 里好 grep）。
+其实内核给了标准做法——在 `#include` **之前**覆盖 `pr_fmt` 模板：
+
+```c
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt   /* 必须在所有 #include 之前 */
+#include <linux/module.h>
+...
+pr_info("module loaded\n");   /* dmesg 里自动变成 "log_levels: module loaded" */
+```
+
+`KBUILD_MODNAME` 是 kbuild 传给编译器的 `-D` 宏，值就是模块名（不带 `.ko`）。
+这样每条日志自带前缀，不用每行手写。本节没这么写是为了让级别演示的代码
+更直白，实际驱动开发建议用 `pr_fmt`。
+
+#### 全链路时间线
+
+| 阶段 | 发生的事 | 产物 |
+|---|---|---|
+| 编译期·预处理 | `pr_*`/`pr_fmt`/`KERN_xxx` 三层宏文本替换 | `printk("<6>...")` |
+| 编译期·编译 | 相邻字符串常量拼接 | `.rodata` 里一条完整格式串 |
+| 运行时 | `printk` 解析 `\001`+数字前缀 → 剥掉、定级别 → 消息入 ring buffer | dmesg 里的带级别记录 |
+
+---
+
+### 1.4 控制台级别 vs dmesg
 
 内核有两个概念要分开：
 
@@ -296,6 +383,7 @@ $ dmesg -l debug
 | 5 | `dmesg` 被大量日志淹没，找不到自己的模块 | 没加固定前缀 | 每条 printk 都加 `log_levels:` 前缀，然后用 `dmesg \| grep log_levels` |
 | 6 | 想临时提高日志级别但重启后失效 | 只改了 `/proc/sys/kernel/printk` | 写进 `/etc/sysctl.d/` 配置文件 |
 | 7 | 用 `pr_debug()` 发现 dmsg 里没有 | `pr_debug()` 默认只在启用了 `DEBUG` 宏或动态调试时编译进代码 | 用 `printk(KERN_DEBUG ...)` 演示，或开启 `CONFIG_DYNAMIC_DEBUG` |
+| 8 | 每条消息手写模块名前缀，又长又容易漏 | 没用 `pr_fmt` 模板 | 在所有 `#include` 前 `#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt`，见 1.3 节 |
 
 ### 4.1 `pr_debug()` 和 `printk(KERN_DEBUG ...)` 的区别
 
@@ -355,5 +443,16 @@ EMERG(0)、ALERT(1)、CRIT(2)、ERR(3) 能实时显示；WARNING(4)、NOTICE(5)�
 <summary>Q5. `dmesg` 和实时控制台看到的消息范围一样吗？</summary>
 
 不一样。`dmesg` 读的是完整 ring buffer，所有级别都在；控制台只显示级别 ≤ console_loglevel 的消息。
+
+</details>
+
+<details>
+<summary>Q6. `pr_info("hi\n")` 从源码到 dmesg，中间经历了哪几步？分别在什么阶段发生？</summary>
+
+① 预处理期：`pr_info` 宏展开为 `printk(KERN_INFO pr_fmt("hi\n"))`，`pr_fmt` 原样返回、`KERN_INFO` 替换为字符串常量 `"\0016"`；
+② 编译期：相邻字符串常量拼接，`.rodata` 里生成一条完整格式串 `"\0016hi\n"`；
+③ 运行时：`printk` 解析开头的 `\001`+数字，剥出日志级别 6，消息（不带前缀）进 ring buffer，`dmesg` 读出来。
+
+全程 ①② 是编译期文本替换与拼接，零运行时开销；`KERN_xxx` 是宏不是变量。
 
 </details>
