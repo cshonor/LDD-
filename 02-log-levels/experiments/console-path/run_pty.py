@@ -19,7 +19,7 @@ import paramiko
 HOST = os.environ.get("RPI_HOST", "192.168.31.109")
 USER = os.environ.get("RPI_USER", "wzp")
 PASSWORD = os.environ.get("RPI_PASSWORD", "")
-REMOTE = os.environ.get("RPI_MODDIR", "/home/wzp/linux-device/02-log_levels")
+REMOTE = os.environ.get("RPI_MODDIR", "/home/wzp/linux-device/02-log-levels")
 
 if not PASSWORD:
     sys.exit("请先设置环境变量 RPI_PASSWORD（树莓派登录密码），不要写进脚本")

@@ -8,14 +8,20 @@ Module.symvers
 modules.order
 .tmp_versions/
 
-# 例外：prebuilt/ 存放「真机验证过」的构建产物，需要纳入版本管理。
-# 作用：记录这个模块确实能在 6.18.34+rpt-rpi-2712 (aarch64) 上编译并加载成功，
-#      换机器/换内核时可以用 modinfo 对比 vermagic 判断能否直接复用。
+# 例外：artifacts/ 存放「真机验证过的构建产物」，需要纳入版本管理。
+# 名字为什么叫 artifacts 而不是 prebuilt：
+#   prebuilt 的通行含义是「预先编译好、让别人免编译直接用的二进制」，
+#   但这些 .ko 的 vermagic 锁死了内核版本，换台机器根本 insmod 不进去，
+#   对别人没有复用价值。它们的实际用途是**构建产物归档**：
+#     1. build.log    —— 记录这次编译确实通过，含当时的警告信息
+#     2. modinfo.txt  —— 留一份 vermagic 样本，换内核/换机器时对照
+#     3. *.ko         —— 配套产物实体
+#   所以叫 artifacts（构建产物），不叫 prebuilt（预编译分发包）。
 # 注意：gitignore 的规则是「后写的覆盖先写的」，所以例外必须放在忽略规则之后。
-!prebuilt/
-!prebuilt/*.ko
-!prebuilt/*.log
-!prebuilt/*.txt
+!artifacts/
+!artifacts/*.ko
+!artifacts/*.log
+!artifacts/*.txt
 
 # 实验目录：由 *.tmpl.c 模板 + sed 生成的源码，属于中间产物，不入库
 experiments/**/*.c

@@ -1,8 +1,8 @@
-# 02-log_levels - printk 日志级别详解
+# 02-log-levels - printk 日志级别详解
 
 > 配套真机：树莓派 5（aarch64，内核 6.18.34+rpt-rpi-2712）  
-> 前置章节：[01-first](../01-first/readme.md)（Hello Kernel Module）  
-> 延伸阅读：[printk 到底打印到哪里？（输出链路完整解析）](printk-output-path.md)
+> 前置章节：[01-first](../01-first/README.md)（Hello Kernel Module）  
+> 延伸阅读：[printk 到底打印到哪里？（输出链路完整解析）](docs/printk-output-path.md)
 
 ## 本节讲什么
 
@@ -103,7 +103,7 @@ $ cat /proc/sys/kernel/printk
 
 > 💡 **"控制台"到底是什么？为什么 SSH 里看不到 printk？**
 > 这是新手最容易困惑的地方，单独写了一篇：
-> [printk 到底打印到哪里？（输出链路完整解析）](printk-output-path.md)
+> [printk 到底打印到哪里？（输出链路完整解析）](docs/printk-output-path.md)
 
 ---
 
@@ -172,7 +172,7 @@ MODULE_VERSION("1.0");
 ### 3.1 编译与加载
 
 ```bash
-cd /path/to/02-log_levels
+cd /path/to/02-log-levels
 make
 sudo insmod log_levels.ko
 ```
@@ -241,7 +241,7 @@ $ cat /proc/sys/kernel/printk
 
 ```bash
 $ sudo dmesg -C
-$ cd /home/wzp/linux-device/02-log_levels
+$ cd /home/wzp/linux-device/02-log-levels
 $ sudo insmod log_levels.ko
 $ dmesg | grep log_levels
 [ 4119.363946] log_levels: module loaded

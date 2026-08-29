@@ -4,7 +4,7 @@
 > 并搞懂背后三件事：模块生命周期、kbuild 构建机制、内核空间和用户空间的根本差异。
 >
 > **实测环境**：树莓派 5（aarch64），Debian 13 trixie，内核 `6.18.34+rpt-rpi-2712`。
-> 本目录下 `prebuilt/` 里的产物就是在这台机器上真机编译并加载验证过的。
+> 本目录下 `artifacts/` 里的产物就是在这台机器上真机编译并加载验证过的。
 
 ---
 
@@ -51,11 +51,11 @@ ls -l /lib/modules/$(uname -r)/build      # 检查内核构建树是否存在（
 |------|------|----------|
 | `hello.c` | 模块源码：入口 `my_init` / 出口 `my_exit` | ✅ |
 | `Makefile` | kbuild 构建脚本 | ✅ |
-| `readme.md` | 本文件 | ✅ |
-| `.gitignore` | 忽略中间产物，但放行 `prebuilt/` | ✅ |
-| `prebuilt/hello.ko` | 真机编译产物（含 vermagic，可 `modinfo` 核对） | ✅ 有意提交 |
-| `prebuilt/build.log` | `make` 完整输出 | ✅ |
-| `prebuilt/modinfo.txt` | `modinfo hello.ko` 输出 | ✅ |
+| `README.md` | 本文件 | ✅ |
+| `.gitignore` | 忽略中间产物，但放行 `artifacts/` | ✅ |
+| `artifacts/hello.ko` | 真机编译产物（含 vermagic，可 `modinfo` 核对） | ✅ 有意提交 |
+| `artifacts/build.log` | `make` 完整输出 | ✅ |
+| `artifacts/modinfo.txt` | `modinfo hello.ko` 输出 | ✅ |
 | `experiments/license-taint/` | `MODULE_LICENSE` / taint / GPL-only 符号的对照实验 | ✅ |
 | `*.o` `*.mod.c` `Module.symvers` 等 | 中间产物 | ❌ 忽略 |
 
@@ -286,7 +286,7 @@ sudo dmesg | tail -2    # ⑥ 看卸载日志
 make clean              # ⑦ 清理
 ```
 
-**真机实测**（树莓派 5 / 6.18.34+rpt-rpi-2712，完整输出见 `prebuilt/build.log`）：
+**真机实测**（树莓派 5 / 6.18.34+rpt-rpi-2712，完整输出见 `artifacts/build.log`）：
 
 ```console
 $ make
@@ -316,13 +316,32 @@ $ sudo rmmod hello && sudo dmesg | tail -2
 
 ---
 
-## 6. `prebuilt/` 里的产物说明
+## 6. `artifacts/` 里的产物说明
 
-这里放着真机编译出的 `hello.ko`，**有意提交进 git**（所以 `.gitignore` 里给 `prebuilt/` 开了例外）。
+这里放着真机编译出的 `hello.ko`，**有意提交进 git**（所以 `.gitignore` 里给 `artifacts/` 开了例外）。
 用途：换机器或换内核时，先 `modinfo` 比对一下 vermagic，就能判断这个二进制还能不能用。
 
+### 为什么叫 `artifacts/` 而不是 `prebuilt/`
+
+`prebuilt` 在开源项目里是约定俗成的说法，意思是「**预先编译好、让别人免编译直接用的二进制**」——
+比如 Android 源码树里的 `prebuilts/`（预编译的 clang / gcc toolchain），或 release 包里的预编译库。
+
+但这个目录里的 `.ko` **对别人没有复用价值**：vermagic 锁死了内核版本
+（`6.18.34+rpt-rpi-2712 ... aarch64`），换任何一台内核版本不同的机器 `insmod` 都会直接报
+`invalid module format`。既然别人拿了也加载不了，它就不是「预编译分发包」。
+
+它的真实用途是**构建产物归档**（build artifact）：
+
+| 文件 | 归档目的 |
+|---|---|
+| `build.log` | 记录「这次编译确实通过了」，含当时的警告信息 |
+| `modinfo.txt` | 留一份 vermagic 样本，换内核 / 换机器时对照 |
+| `hello.ko` | 配套的产物实体 |
+
+所以叫 `artifacts/`。另外不要用 `build/`——它几乎出现在所有 `.gitignore` 模板里，会被默认忽略。
+
 ```
-$ modinfo prebuilt/hello.ko
+$ modinfo artifacts/hello.ko
 filename:       /home/wzp/linux-device/01-first/hello.ko
 version:        0.1
 description:    First kernel module: print hello/goodbye on load/unload

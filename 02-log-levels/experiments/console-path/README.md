@@ -2,7 +2,7 @@
 
 验证「printk 不会自动出现在 SSH 终端」这一结论，并摸清内核日志的完整输出链路。
 
-结论文档见：[../../printk-output-path.md](../../printk-output-path.md)
+结论文档见：[../../docs/printk-output-path.md](../../docs/printk-output-path.md)
 
 ## 文件说明
 
@@ -39,7 +39,7 @@ python run_console.py
 | `RPI_HOST` | `192.168.31.109` | 树莓派地址 |
 | `RPI_USER` | `wzp` | 登录用户 |
 | `RPI_PASSWORD` | （无，必填） | 登录密码 |
-| `RPI_MODDIR` | `/home/wzp/linux-device/02-log_levels` | 远端模块目录 |
+| `RPI_MODDIR` | `/home/wzp/linux-device/02-log-levels` | 远端模块目录 |
 
 不设 `RPI_PASSWORD` 时脚本会直接退出并提示，不会用空密码去连。
 
@@ -72,7 +72,7 @@ insmod 命令自身输出: ''
 4. **`head -c N /dev/kmsg` 会报 `Invalid argument`**：`/dev/kmsg` 是
    record-oriented 设备，必须按整条记录读。
 5. **C 组（交互式 shell）的判断容易误判**：命令行回显里包含路径字符串
-   （如 `cd /home/wzp/linux-device/02-log_levels`），用 `grep log_levels`
+   （如 `cd /home/wzp/linux-device/02-log-levels`），用 `grep log_levels`
    检测会命中回显而非内核消息。要看终端实际收到了什么。
 
 ## 补充验证命令（手动执行）

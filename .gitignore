@@ -7,3 +7,7 @@
 Module.symvers
 modules.order
 .tmp_versions/
+
+# Python 缓存（tools/ 和各章节实验脚本运行时产生）
+__pycache__/
+*.pyc
