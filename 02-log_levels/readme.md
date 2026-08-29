@@ -1,7 +1,8 @@
 # 02-log_levels - printk 日志级别详解
 
 > 配套真机：树莓派 5（aarch64，内核 6.18.34+rpt-rpi-2712）  
-> 前置章节：[01-first](../01-first/readme.md)（Hello Kernel Module）
+> 前置章节：[01-first](../01-first/readme.md)（Hello Kernel Module）  
+> 延伸阅读：[printk 到底打印到哪里？（输出链路完整解析）](printk-output-path.md)
 
 ## 本节讲什么
 
@@ -99,6 +100,10 @@ $ cat /proc/sys/kernel/printk
 树莓派 5（内核 6.18.34+rpt-rpi-2712）默认是 `3 4 1 3`：只有级别数字 ≤ 3 的消息（EMERG/ALERT/CRIT/ERR）才能打到控制台；WARNING(4)、NOTICE(5)、INFO(6)、DEBUG(7) 只能进 dmesg。
 
 > 注：很多 x86 发行版默认是 `4 4 1 7`，比树莓派多放行 WARNING。具体值以 `cat /proc/sys/kernel/printk` 为准。
+
+> 💡 **"控制台"到底是什么？为什么 SSH 里看不到 printk？**
+> 这是新手最容易困惑的地方，单独写了一篇：
+> [printk 到底打印到哪里？（输出链路完整解析）](printk-output-path.md)
 
 ---
 
