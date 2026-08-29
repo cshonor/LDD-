@@ -1,0 +1,354 @@
+# 02-log_levels - printk 日志级别详解
+
+> 配套真机：树莓派 5（aarch64，内核 6.18.34+rpt-rpi-2712）  
+> 前置章节：[01-first](../01-first/readme.md)（Hello Kernel Module）
+
+## 本节讲什么
+
+`printk` 是内核里的 `printf`，但它不是直接打印到终端，而是把消息送进内核环形日志缓冲区。每个消息都带一个**日志级别**，内核根据当前系统的 `console_loglevel` 决定哪些消息可以输出到**控制台**，哪些只留在 `dmesg` 里。
+
+本节目标：
+
+1. 理解 printk 的 8 个日志级别（不是 7 个，很多教程漏了 `KERN_CRIT`）。
+2. 搞清楚 `KERN_INFO` 这类宏的**真实形态**——它不是 `printk` 的第二个参数，而是字符串拼接。
+3. 在真机上加载模块，看默认设置下哪些级别的消息能直接看到，哪些被过滤掉。
+4. 学会临时/永久修改 `console_loglevel`，让 `KERN_DEBUG` 也能显示。
+
+---
+
+## 1. 代码结构与核心概念
+
+### 1.1 8 个日志级别（数字越小越紧急）
+
+printk 的级别定义在 `include/linux/kern_levels.h`：
+
+| 宏 | 展开后的字符串 | 数字 | 含义 |
+|---|---:|---:|---|
+| `KERN_EMERG` | `"<0>"` | 0 | 系统崩溃/不可用 |
+| `KERN_ALERT` | `"<1>"` | 1 | 必须立刻处理 |
+| `KERN_CRIT` | `"<2>"` | 2 | 严重条件（硬件/临界错误） |
+| `KERN_ERR` | `"<3>"` | 3 | 错误条件 |
+| `KERN_WARNING` | `"<4>"` | 4 | 警告条件 |
+| `KERN_NOTICE` | `"<5>"` | 5 | 正常但重要 |
+| `KERN_INFO` | `"<6>"` | 6 | 普通信息 |
+| `KERN_DEBUG` | `"<7>"` | 7 | 调试信息 |
+
+**记忆口诀**：
+
+> **Emerg(0) → Alert(1) → Crit(2) → Err(3) → Warning(4) → Notice(5) → Info(6) → Debug(7)**  
+> 数字越小越紧急，越不容易被过滤掉。
+
+### 1.2 `printk(KERN_INFO "...")` 的真实展开
+
+这是新手最容易踩的坑：
+
+```c
+printk(KERN_INFO "log_levels: Hello, Kernel\n");
+```
+
+预处理器会把它展开成：
+
+```c
+printk("<6>" "log_levels: Hello, Kernel\n");
+```
+
+C 语言里相邻字符串常量会**自动拼接**，所以最终等价于：
+
+```c
+printk("<6>log_levels: Hello, Kernel\n");
+```
+
+也就是说，`<6>` 被塞进消息头部，printk 解析这个数字 6 就知道这是 `KERN_INFO` 级别。
+
+所以下面这种写法是**错的**：
+
+```c
+printk(KERN_INFO, "log_levels: Hello, Kernel\n");   /* ❌ 多写了逗号 */
+```
+
+展开后变成 `printk("<6>", "...")`，第一个参数变成了格式字符串 `"<6>"`，第二个参数被当成一个参数但格式串里没占位符——编译能过，但打印出来的不是你想要的内容。
+
+### 1.3 控制台级别 vs dmesg
+
+内核有两个概念要分开：
+
+- **环形缓冲区（ring buffer）**：所有级别的消息都会进去，`dmesg` 可以全部看到。
+- **控制台（console）**：只有**优先级 ≤ console_loglevel** 的消息才会被实时打到控制台。
+
+你可以把 printk 想象成发邮件：
+
+- 所有邮件都进了服务器（dmesg 能查）。
+- 但只有重要程度超过某个阈值（console_loglevel）的邮件，才会弹窗通知你（控制台实时显示）。
+
+查看当前控制台级别：
+
+```bash
+$ cat /proc/sys/kernel/printk
+3       4       1       3
+```
+
+四个数字分别是：
+
+| 位置 | 含义 |
+|---|---|
+| 第 1 个 | **console_loglevel**：当前控制台允许输出的最高级别数字 |
+| 第 2 个 | **default_message_loglevel**：没有显式 `<N>` 前缀的消息默认用几级 |
+| 第 3 个 | **minimum_console_loglevel**：console_loglevel 能设到的最小值 |
+| 第 4 个 | **default_console_loglevel**：系统默认的控制台级别 |
+
+树莓派 5（内核 6.18.34+rpt-rpi-2712）默认是 `3 4 1 3`：只有级别数字 ≤ 3 的消息（EMERG/ALERT/CRIT/ERR）才能打到控制台；WARNING(4)、NOTICE(5)、INFO(6)、DEBUG(7) 只能进 dmesg。
+
+> 注：很多 x86 发行版默认是 `4 4 1 7`，比树莓派多放行 WARNING。具体值以 `cat /proc/sys/kernel/printk` 为准。
+
+---
+
+## 2. 代码逐行解析
+
+```c
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/init.h>
+```
+
+- `<linux/module.h>`：模块机制。
+- `<linux/kernel.h>`：printk 和 KERN_xxx 宏定义。
+- `<linux/init.h>`：`__init` / `__exit` 修饰符和 `module_init`/`module_exit`。
+
+```c
+static int __init log_levels_init(void)
+{
+    pr_info("log_levels: module loaded\n");
+```
+
+`pr_info` 是内核提供的快捷宏，等价于 `printk(KERN_INFO ...)`。类似还有 `pr_err`、`pr_warn`、`pr_debug` 等。
+
+```c
+    printk(KERN_EMERG  "log_levels: EMERGENCY   - system unusable\n");
+    printk(KERN_ALERT   "log_levels: ALERT       - action must be taken\n");
+    printk(KERN_CRIT     "log_levels: CRITICAL    - critical condition\n");
+    printk(KERN_ERR      "log_levels: ERROR       - error condition\n");
+    printk(KERN_WARNING  "log_levels: WARNING     - warning condition\n");
+    printk(KERN_NOTICE   "log_levels: NOTICE      - normal but significant\n");
+    printk(KERN_INFO     "log_levels: INFO        - informational\n");
+    printk(KERN_DEBUG    "log_levels: DEBUG       - debug-level message\n");
+```
+
+按级别从高到低打印 8 行，每一行前面都有 `log_levels:` 前缀，方便在 dmesg 里过滤。
+
+```c
+    pr_info("log_levels: all 8 levels printed, check which ones you can see\n");
+    return 0;
+}
+```
+
+```c
+static void __exit log_levels_exit(void)
+{
+    pr_info("log_levels: module unloaded\n");
+}
+```
+
+```c
+module_init(log_levels_init);
+module_exit(log_levels_exit);
+
+MODULE_AUTHOR("MPCoding - LDD");
+MODULE_DESCRIPTION("printk log levels demo for Linux kernel module");
+MODULE_LICENSE("GPL");
+MODULE_VERSION("1.0");
+```
+
+元信息宏上一节已讲过。`MODULE_LICENSE("GPL")` 是唯一能让我们自由调用 GPL-only 内核符号的写法。
+
+---
+
+## 3. 真机实测输出
+
+### 3.1 编译与加载
+
+```bash
+cd /path/to/02-log_levels
+make
+sudo insmod log_levels.ko
+```
+
+### 3.2 默认 console_loglevel 下控制台能看到什么
+
+在树莓派 5 上默认是 `3 4 1 3`，所以只有前 4 个级别（EMERG/ALERT/CRIT/ERR）能实时打到控制台。WARNING(4)、NOTICE(5)、INFO(6)、DEBUG(7) 被控制台过滤，只能进 `dmesg`。
+
+用 `dmesg --level=emerg,alert,crit,err` 查看默认能进控制台级别的消息：
+
+```bash
+$ dmesg --level=emerg,alert,crit,err | grep log_levels
+[ 4077.736831] log_levels: EMERGENCY   - system unusable
+[ 4077.736839] log_levels: ALERT       - action must be taken
+[ 4077.736841] log_levels: CRITICAL    - critical condition
+[ 4077.736842] log_levels: ERROR       - error condition
+```
+
+注意：默认 `console_loglevel=3` 时，WARNING(4) **也不会实时刷到控制台**，但 `dmesg` 里仍然完整保留。
+
+### 3.3 用 dmesg 查看全部级别
+
+```bash
+$ dmesg --level=notice,info,debug | grep log_levels
+```
+
+在树莓派 5 默认级别下：
+
+```
+[ 4077.736820] log_levels: module loaded
+[ 4077.736844] log_levels: NOTICE      - normal but significant
+[ 4077.736845] log_levels: INFO        - informational
+[ 4077.736846] log_levels: DEBUG       - debug-level message
+[ 4077.736847] log_levels: all 8 levels printed, check which ones you can see
+```
+
+再看完整 `dmesg | grep log_levels`：
+
+```
+[ 4077.736820] log_levels: module loaded
+[ 4077.736831] log_levels: EMERGENCY   - system unusable
+[ 4077.736839] log_levels: ALERT       - action must be taken
+[ 4077.736841] log_levels: CRITICAL    - critical condition
+[ 4077.736842] log_levels: ERROR       - error condition
+[ 4077.736843] log_levels: WARNING     - warning condition
+[ 4077.736844] log_levels: NOTICE      - normal but significant
+[ 4077.736845] log_levels: INFO        - informational
+[ 4077.736846] log_levels: DEBUG       - debug-level message
+[ 4077.736847] log_levels: all 8 levels printed, check which ones you can see
+[ 4077.899839] log_levels: module unloaded
+```
+
+**注意**：`dmesg` 里的所有 8 行都在，因为缓冲区不看 `console_loglevel`。
+
+### 3.4 让 KERN_DEBUG 也能打到控制台
+
+**临时生效（重启失效）**：
+
+```bash
+$ sudo sh -c 'echo 8 > /proc/sys/kernel/printk'
+$ cat /proc/sys/kernel/printk
+8       4       1       7
+```
+
+把 console_loglevel 提升到 8 后，清空日志再加载模块：
+
+```bash
+$ sudo dmesg -C
+$ cd /home/wzp/linux-device/02-log_levels
+$ sudo insmod log_levels.ko
+$ dmesg | grep log_levels
+[ 4119.363946] log_levels: module loaded
+[ 4119.363963] log_levels: EMERGENCY   - system unusable
+[ 4119.363972] log_levels: ALERT       - action must be taken
+[ 4119.363974] log_levels: CRITICAL    - critical condition
+[ 4119.363976] log_levels: ERROR       - error condition
+[ 4119.363977] log_levels: WARNING     - warning condition
+[ 4119.363979] log_levels: NOTICE      - normal but significant
+[ 4119.363981] log_levels: INFO        - informational
+[ 4119.363982] log_levels: DEBUG       - debug-level message
+[ 4119.363984] log_levels: all 8 levels printed, check which ones you can see
+```
+
+现在 8 个级别全部实时可见。
+
+**永久生效**：
+
+```bash
+# 编辑 /etc/sysctl.conf 或创建 /etc/sysctl.d/99-printk.conf
+kernel.printk = 8 4 1 7
+
+# 然后应用
+sudo sysctl --system
+```
+
+### 3.5 按级别过滤 dmesg
+
+```bash
+# 只看 error 级别及以上的消息
+$ dmesg -l err,crit,alert,emerg
+
+# 只看 info 级别
+$ dmesg -l info
+
+# 只看 debug 级别
+$ dmesg -l debug
+```
+
+`dmesg -l` 用的是级别名（小写），不是 KERN_ 宏名。
+
+---
+
+## 4. 常见坑
+
+| # | 现象 | 原因 | 解决 |
+|---|---|---|---|
+| 1 | `printk(KERN_INFO, "...")` 编译通过但输出奇怪 | KERN_xxx 是字符串宏，不是 `printk` 的参数，不能加逗号 | 写成 `printk(KERN_INFO "...")` |
+| 2 | `KERN_DEBUG` 的消息控制台实时看不到 | 默认 console_loglevel 通常 ≤ 4，DEBUG(7) 被过滤 | `echo 8 > /proc/sys/kernel/printk`，或用 `dmesg` 直接读缓冲区 |
+| 3 | `printk` 没输出到普通终端 | printk 不会写用户态 stdout/终端，只进内核 ring buffer | 用 `dmesg` 或 `cat /dev/kmsg` |
+| 4 | 消息前面带 `<6>` 原样输出 | 把 KERN_xxx 当参数传了，没有被字符串拼接解析 | 检查逗号、括号 |
+| 5 | `dmesg` 被大量日志淹没，找不到自己的模块 | 没加固定前缀 | 每条 printk 都加 `log_levels:` 前缀，然后用 `dmesg \| grep log_levels` |
+| 6 | 想临时提高日志级别但重启后失效 | 只改了 `/proc/sys/kernel/printk` | 写进 `/etc/sysctl.d/` 配置文件 |
+| 7 | 用 `pr_debug()` 发现 dmsg 里没有 | `pr_debug()` 默认只在启用了 `DEBUG` 宏或动态调试时编译进代码 | 用 `printk(KERN_DEBUG ...)` 演示，或开启 `CONFIG_DYNAMIC_DEBUG` |
+
+### 4.1 `pr_debug()` 和 `printk(KERN_DEBUG ...)` 的区别
+
+`pr_debug()` 比较特殊：
+
+- 如果**没有**定义 `DEBUG` 宏，很多内核配置下 `pr_debug()` 会被编译成空语句。
+- `printk(KERN_DEBUG ...)` 永远会编译进代码，只要级别够低就能看到。
+
+所以做"级别演示"时建议用 `printk(KERN_DEBUG ...)`，避免被 `pr_debug()` 的开关逻辑干扰。
+
+---
+
+## 5. printk 与 HFT/嵌入式关联
+
+| 场景 |  printk 级别的意义 |
+|---|---|
+| **HFT 低延迟路径** | 生产环境通常把 `console_loglevel` 设得很低（只留 err），避免 INFO/DEBUG 刷屏拖慢中断处理 |
+| **嵌入式调试** | 开发阶段开到 8，甚至开 `CONFIG_DYNAMIC_DEBUG`；量产时关闭或重定向到串口/flash |
+| **故障排查** | 用 `dmesg -l err` 快速定位硬错误，比翻完整 dmesg 高效 |
+| **内核态与用户态区别** | 用户态 `printf` 直接写 fd=1；内核态 `printk` 写 ring buffer，再经 klogd/rsyslog 可能进 `/var/log/kern.log` |
+
+---
+
+## 6. 自测题
+
+<details>
+<summary>Q1. printk 的 8 个级别里，数字最小和最分别是哪个？</summary>
+
+最小：KERN_EMERG（0，最紧急）；最大：KERN_DEBUG（7，最不紧急）。
+
+</details>
+
+<details>
+<summary>Q2. 默认 console_loglevel=3（树莓派 5 实测）时，哪些级别的消息能实时打到控制台？</summary>
+
+EMERG(0)、ALERT(1)、CRIT(2)、ERR(3) 能实时显示；WARNING(4)、NOTICE(5)、INFO(6)、DEBUG(7) 只能进 dmesg。
+
+> 如果你的机器默认是 `4 4 1 7`，则 WARNING(4) 也能实时显示。
+
+</details>
+
+<details>
+<summary>Q3. 为什么 `printk(KERN_INFO, "...")` 是错的？</summary>
+
+因为 `KERN_INFO` 展开成字符串 `"<6>"`，`printk` 接收的是**一个格式字符串**（含拼接后的 `<6>`），不是两个参数。加了逗号会变成第一个参数是 `"<6>"`，第二个参数被忽略或导致未定义行为。
+
+</details>
+
+<details>
+<summary>Q4. 想让 KERN_DEBUG 的消息实时显示，最快捷的命令是什么？</summary>
+
+`sudo sh -c 'echo 8 > /proc/sys/kernel/printk'`（临时生效）。
+
+</details>
+
+<details>
+<summary>Q5. `dmesg` 和实时控制台看到的消息范围一样吗？</summary>
+
+不一样。`dmesg` 读的是完整 ring buffer，所有级别都在；控制台只显示级别 ≤ console_loglevel 的消息。
+
+</details>

@@ -1,0 +1,9 @@
+filename:       /home/wzp/linux-device/02-log_levels/log_levels.ko
+version:        1.0
+license:        GPL
+description:    printk log levels demo for Linux kernel module
+author:         MPCoding - LDD
+srcversion:     679F69BD6D071E121D77AC2
+depends:        
+name:           log_levels
+vermagic:       6.18.34+rpt-rpi-2712 SMP preempt mod_unload modversions aarch64

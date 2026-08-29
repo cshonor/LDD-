@@ -1,0 +1,10 @@
+make -C /lib/modules/6.18.34+rpt-rpi-2712/build M=/home/wzp/linux-device/02-log_levels modules
+make[1]: Entering directory '/usr/src/linux-headers-6.18.34+rpt-rpi-2712'
+make[2]: Entering directory '/home/wzp/linux-device/02-log_levels'
+  CC [M]  log_levels.o
+  MODPOST Module.symvers
+  CC [M]  log_levels.mod.o
+  CC [M]  .module-common.o
+  LD [M]  log_levels.ko
+make[2]: Leaving directory '/home/wzp/linux-device/02-log_levels'
+make[1]: Leaving directory '/usr/src/linux-headers-6.18.34+rpt-rpi-2712'
