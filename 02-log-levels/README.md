@@ -387,7 +387,9 @@ $ dmesg -l debug
 | 8 | 每条消息手写模块名前缀，又长又容易漏 | 没用 `pr_fmt` 模板 | 在所有 `#include` 前 `#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt`，见 1.3 节 |
 | 9 | 用 `dmesg -c` 看了一次，之前的日志全没了 | `-c` 是 **read-clear**（读完立刻清空），不是 `-C` | 一律用 `dmesg`（只读）或 `dmesg -C`（只清不读）。见 [kernel-log-buffer.md §5](docs/kernel-log-buffer.md) |
 | 10 | 早先的 printk 在 `dmesg` 里找不到了 | 缓冲区只有 **128 KiB**，满了会**静默覆盖**最旧记录 | 去 `journalctl -k` 查（journald 同步抄走了一份）；或调大 `log_buf_len`，同上使用 `dmesg -w` 实时跟随 |
-| 11 | 以为缓冲区有几 MB，结果调试输出被冲掉 | 实测 `CONFIG_LOG_BUF_SHIFT=17` → **128 KiB**，约 584 条短消息就满 | 用 `grep CONFIG_LOG_BUF_SHIFT /boot/config-$(uname -r)` 自己确认 |
+| 11 | 以为缓冲区有几 MB，结果调试输出被冲掉 | 实测 `CONFIG_LOG_BUF_SHIFT=17` → **128 KiB**，约 585 条短消息（单条 214 B）就满 | 用 `grep CONFIG_LOG_BUF_SHIFT /boot/config-$(uname -r)` 自己确认 |
+| 12 | `dmesg -C` 之后以为缓冲区空了 | 它**只挪 syslog 游标**，记录一条没删、空间一点没腾。实测清完 `/dev/kmsg` 里 619 条和首条 seq 纹丝不动 | 要看真实内容读 `/dev/kmsg`；要腾空间只能靠新消息挤，或重启。详见 [kernel-log-buffer.md §4](docs/kernel-log-buffer.md) |
+| 13 | 用 `dmesg \| wc -l` 判断缓冲区占用率 | 那是"游标之后还剩几条没读"，不是缓冲区里有多少条 | 同上，读 `/dev/kmsg`。本仓库的 `experiments/log-buffer-fill/rbfill.c` 就是干这个的 |
 
 ### 4.1 `pr_debug()` 和 `printk(KERN_DEBUG ...)` 的区别
 

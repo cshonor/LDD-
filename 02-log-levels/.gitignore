@@ -18,3 +18,9 @@ artifacts/*
 !artifacts/*.ko
 !artifacts/*.log
 !artifacts/*.txt
+
+# 用户态实验程序的可执行文件
+/01-first/experiments/*/run_*
+/02-log-levels/experiments/*/run_console
+/02-log-levels/experiments/*/run_pty
+/02-log-levels/experiments/*/rbfill
