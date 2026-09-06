@@ -7,6 +7,10 @@
 Module.symvers
 modules.order
 .tmp_versions/
+*.order
+*.symvers
+*.cmd
+Module.markers
 
 # 例外：artifacts/ 存放「真机验证过的构建产物」，需要纳入版本管理。
 # 名字为什么叫 artifacts 而不是 prebuilt：
