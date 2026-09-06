@@ -20,7 +20,8 @@ artifacts/*
 !artifacts/*.txt
 
 # 用户态实验程序的可执行文件
-/01-first/experiments/*/run_*
-/02-log-levels/experiments/*/run_console
-/02-log-levels/experiments/*/run_pty
-/02-log-levels/experiments/*/rbfill
+# 注意：.gitignore 里的前导 / 是「相对本文件所在目录」，
+#      不是相对仓库根。这里写裸名字即可匹配任意子目录。
+experiments/*/run_console
+experiments/*/run_pty
+experiments/*/rbfill
