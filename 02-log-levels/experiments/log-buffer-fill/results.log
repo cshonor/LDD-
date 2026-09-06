@@ -1,0 +1,108 @@
+# rbfill.sh 原始输出（树莓派 5 / 内核 6.18.34+rpt-rpi-2712 / 2026-09-06）
+#
+# 第 1 轮：./rbfill.sh 300 16 200
+# 第 2 轮：./rbfill.sh 400 25 200   （接着第 1 轮继续写，跑到溢出）
+
+
+==================== 第 1 轮：300 条 / 每 16 条观察 ====================
+缓冲容量    : 131072 字节 (128 KiB)，CONFIG_LOG_BUF_SHIFT=17
+写入方式    : sudo 写入
+每条载荷    : 200 字节
+
+=== 基线：行数=57  首行=[[ 5739.296903] log_levels: module loaded]
+
+已写入   缓冲区行数   RBFILL存活  首条存活  首行
+------------------------------------------------------------------------
+16       73       16       1          [ 5739.296903] log_levels: module loaded
+32       89       32       1          [ 5739.296903] log_levels: module loaded
+48       105      48       1          [ 5739.296903] log_levels: module loaded
+64       121      64       1          [ 5739.296903] log_levels: module loaded
+80       137      80       1          [ 5739.296903] log_levels: module loaded
+96       153      96       1          [ 5739.296903] log_levels: module loaded
+112      169      112      1          [ 5739.296903] log_levels: module loaded
+128      185      128      1          [ 5739.296903] log_levels: module loaded
+144      201      144      1          [ 5739.296903] log_levels: module loaded
+160      217      160      1          [ 5739.296903] log_levels: module loaded
+176      233      176      1          [ 5739.296903] log_levels: module loaded
+192      249      192      1          [ 5739.296903] log_levels: module loaded
+208      265      208      1          [ 5739.296903] log_levels: module loaded
+224      281      224      1          [ 5739.296903] log_levels: module loaded
+240      297      240      1          [ 5739.296903] log_levels: module loaded
+256      313      256      1          [ 5739.296903] log_levels: module loaded
+272      329      272      1          [ 5739.296903] log_levels: module loaded
+288      345      288      1          [ 5739.296903] log_levels: module loaded
+
+=== 最终结果 ===
+  缓冲区总行数        : 357
+  dmesg 输出字节数    : 73778
+  RBFILL 存活条数     : 300
+  RBFILL 第 1 条还在吗: 1
+  基线首行还在吗      : 1
+  最早存活的 RBFILL   : [665415.417675] RBFILL 00001 xxxxxxxxxxx
+  最新存活的 RBFILL   : [665418.468085] RBFILL 00300 xxxxxxxxxxx
+# 判定：357 行 ≈ 76 KiB（73778 B 含时间戳前缀，反推文本 ≈ 67 KB），未溢出
+
+
+==================== 第 2 轮：400 条 / 每 25 条观察 ====================
+缓冲容量    : 131072 字节 (128 KiB)，CONFIG_LOG_BUF_SHIFT=17
+写入方式    : sudo 写入
+每条载荷    : 200 字节
+
+=== 基线：行数=357  首行=[[ 5739.296903] log_levels: module loaded]
+
+已写入   缓冲区行数   RBFILL存活  首条存活  首行
+------------------------------------------------------------------------
+25       382      325      2          [ 5739.296903] log_levels: module loaded
+50       407      350      2          [ 5739.296903] log_levels: module loaded
+75       432      375      2          [ 5739.296903] log_levels: module loaded
+100      457      400      2          [ 5739.296903] log_levels: module loaded
+125      482      425      2          [ 5739.296903] log_levels: module loaded
+150      507      450      2          [ 5739.296903] log_levels: module loaded
+175      532      475      2          [ 5739.296903] log_levels: module loaded
+200      557      500      2          [ 5739.296903] log_levels: module loaded
+225      582      525      2          [ 5739.296903] log_levels: module loaded
+250      607      550      2          [ 5739.296903] log_levels: module loaded
+275      594      575      2          [58579.736998] input: INSTANT USB GAMING  ★溢出
+300      584      584      1          [665415.594403] RBFILL 00017 xxxxxxxxxxx
+325      584      584      1          [665415.838555] RBFILL 00042 xxxxxxxxxxx
+350      584      584      1          [665416.090519] RBFILL 00067 xxxxxxxxxxx
+375      584      584      1          [665416.335978] RBFILL 00092 xxxxxxxxxxx
+400      584      584      1          [665416.589487] RBFILL 00117 xxxxxxxxxxx
+
+=== 最终结果 ===
+  缓冲区总行数        : 584
+  dmesg 输出字节数    : 134320
+  RBFILL 存活条数     : 584
+  RBFILL 第 1 条还在吗: 1
+  基线首行还在吗      : 0                       ← 7 天前那条已被丢弃
+  最早存活的 RBFILL   : [665416.589487] RBFILL 00117 xxxxxxxxxxx
+  最新存活的 RBFILL   : [665444.967371] RBFILL 00400 xxxxxxxxxxx
+# 判定：607 → 594 行数回落 = 覆盖开始；之后锁死 584 行 = 稳态
+
+
+==================== 事后核对 ====================
+$ journalctl -k | grep -c RBFILL
+700                     ← 两轮共写 300+400=700 条，journald 一条不少
+
+$ sudo dmesg -C
+$ dmesg | wc -l
+0                       ← 缓冲区清空
+
+$ journalctl -k | grep -c RBFILL
+700                     ← 清 dmesg 不影响 journald，数据仍在
+
+
+==================== 账目核对 ====================
+共写入             : 700 条（第 1 轮 300 + 第 2 轮 400）
+稳态存活           : 584 条
+被丢弃（最老的）    : 700 - 584 = 116 条  → 即第 1 轮的 #00001 ~ #00116
+存活构成           : 第 1 轮 #00117~#00300（184 条）+ 第 2 轮 #00001~#00400（400 条）= 584 ✓
+
+单条文本长度        : "RBFILL " 7 B + "00117" 5 B + " " 1 B + 200 B = 213 B
+584 × 213 B        : 124 392 B ≈ 121.5 KiB
+缓冲区标称容量      : 131 072 B = 128 KiB
+差额               : ≈ 6 680 B（描述符 + 对齐开销，约 5%）
+
+dmesg 输出 134320 B = 584 条 × 230 B
+                  = 213 B 文本 + 17 B 时间戳前缀 "[665416.589487] "
+                  → 反推原始文本 ≈ 134320 - 584×17 = 124 392 B ✓ 与上式吻合

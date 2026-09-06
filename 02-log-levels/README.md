@@ -2,7 +2,8 @@
 
 > 配套真机：树莓派 5（aarch64，内核 6.18.34+rpt-rpi-2712）  
 > 前置章节：[01-first](../01-first/README.md)（Hello Kernel Module）  
-> 延伸阅读：[printk 到底打印到哪里？（输出链路完整解析）](docs/printk-output-path.md)
+> 延伸阅读：[printk 到底打印到哪里？（输出链路完整解析）](docs/printk-output-path.md)  
+> 　　　　　[内核环形缓冲区：容量、覆盖与持久化](docs/kernel-log-buffer.md)
 
 ## 本节讲什么
 
@@ -384,6 +385,9 @@ $ dmesg -l debug
 | 6 | 想临时提高日志级别但重启后失效 | 只改了 `/proc/sys/kernel/printk` | 写进 `/etc/sysctl.d/` 配置文件 |
 | 7 | 用 `pr_debug()` 发现 dmsg 里没有 | `pr_debug()` 默认只在启用了 `DEBUG` 宏或动态调试时编译进代码 | 用 `printk(KERN_DEBUG ...)` 演示，或开启 `CONFIG_DYNAMIC_DEBUG` |
 | 8 | 每条消息手写模块名前缀，又长又容易漏 | 没用 `pr_fmt` 模板 | 在所有 `#include` 前 `#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt`，见 1.3 节 |
+| 9 | 用 `dmesg -c` 看了一次，之前的日志全没了 | `-c` 是 **read-clear**（读完立刻清空），不是 `-C` | 一律用 `dmesg`（只读）或 `dmesg -C`（只清不读）。见 [kernel-log-buffer.md §5](docs/kernel-log-buffer.md) |
+| 10 | 早先的 printk 在 `dmesg` 里找不到了 | 缓冲区只有 **128 KiB**，满了会**静默覆盖**最旧记录 | 去 `journalctl -k` 查（journald 同步抄走了一份）；或调大 `log_buf_len`，同上使用 `dmesg -w` 实时跟随 |
+| 11 | 以为缓冲区有几 MB，结果调试输出被冲掉 | 实测 `CONFIG_LOG_BUF_SHIFT=17` → **128 KiB**，约 584 条短消息就满 | 用 `grep CONFIG_LOG_BUF_SHIFT /boot/config-$(uname -r)` 自己确认 |
 
 ### 4.1 `pr_debug()` 和 `printk(KERN_DEBUG ...)` 的区别
 
@@ -403,7 +407,7 @@ $ dmesg -l debug
 | **HFT 低延迟路径** | 生产环境通常把 `console_loglevel` 设得很低（只留 err），避免 INFO/DEBUG 刷屏拖慢中断处理 |
 | **嵌入式调试** | 开发阶段开到 8，甚至开 `CONFIG_DYNAMIC_DEBUG`；量产时关闭或重定向到串口/flash |
 | **故障排查** | 用 `dmesg -l err` 快速定位硬错误，比翻完整 dmesg 高效 |
-| **内核态与用户态区别** | 用户态 `printf` 直接写 fd=1；内核态 `printk` 写 ring buffer，再经 klogd/rsyslog 可能进 `/var/log/kern.log` |
+| **内核态与用户态区别** | 用户态 `printf` 直接写 fd=1；内核态 `printk` 写 ring buffer，**内核自己从不落盘** —— 是 systemd-journald 在旁边同步抄走一份存进 `/var/log/journal`（本机 rsyslog 未运行，`/var/log/kern.log` 不存在）。详见 [kernel-log-buffer.md](docs/kernel-log-buffer.md) |
 
 ---
 
