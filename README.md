@@ -27,8 +27,11 @@
 
 ## 学习路线
 
+> `00-` 开头的是**前置基础**（Linux 通用知识，不占主线编号），主线从 `01-first` 起。
+
 | 章节 | 主题 | 关键知识点 | 状态 |
 |---|---|---|---|
+| [00-dev-and-partitions](00-dev-and-partitions/README.md) | `/dev` 与分区：硬件 vs 软件 | 分区表写在介质上（MBR 16 字节逐字解析）、`/dev/xxx` 是 devtmpfs 里的内存节点、名字由驱动+探测顺序决定、**破坏分区表后节点不会立刻消失** | ✅ |
 | [01-first](01-first/README.md) | 第一个内核模块 | kbuild 两阶段构建、`insmod`/`rmmod`、`__init`/`__exit` 段机制、`MODULE_LICENSE` 与 taint、GPL-only 符号 | ✅ |
 | [02-log-levels](02-log-levels/README.md) | printk 日志级别 | 8 个级别、`console_loglevel` 过滤、字符串拼接语法 | ✅ |
 | [02-log-levels/docs](02-log-levels/docs/printk-output-path.md) | printk 输出链路 | ring buffer、`/dev/kmsg`、console vs 终端、为什么 SSH 里看不到 | ✅ |
@@ -171,6 +174,9 @@ kbuild 的规命令行以 Tab 开头，用空格会报 `missing separator`。
 
 | 坑 | 出处 |
 |---|---|
+| 破坏分区表后 `/dev/mmcblk0p1` **不会立刻消失**，必须 `BLKRRPART`/`partprobe`/重启让内核重扫 | [00-dev-and-partitions](00-dev-and-partitions/README.md) |
+| loop 设备没设 `LO_FLAGS_PARTSCAN` 时，`BLKRRPART` 返回 `EINVAL`（errno 22） | [00-dev-and-partitions](00-dev-and-partitions/README.md) |
+| `statfs("/dev").f_type` 是 `TMPFS_MAGIC` 而不是 `DEVFS_SUPER_MAGIC`（devtmpfs 借 shmem 实现） | [00-dev-and-partitions](00-dev-and-partitions/README.md) |
 | 不写 `MODULE_LICENSE` 在内核 ≥ 5.16 上是**构建失败**，不只是警告 | [01-first](01-first/README.md) |
 | 内核只认 6 个许可证字符串，`"GPL v2 or later"` 和 `"GPLv2"` 都不在清单里 | [01-first](01-first/README.md) |
 | `taints kernel` 有两类：树外模块（bit 12，躲不掉）和许可证（bit 0） | [01-first/experiments/license-taint](01-first/experiments/license-taint/results.log) |
