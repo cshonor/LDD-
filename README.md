@@ -32,10 +32,11 @@
 | [01-first](01-first/README.md) | 第一个内核模块 | kbuild 两阶段构建、`insmod`/`rmmod`、`__init`/`__exit` 段机制、`MODULE_LICENSE` 与 taint、GPL-only 符号 | ✅ |
 | [02-log-levels](02-log-levels/README.md) | printk 日志级别 | 8 个级别、`console_loglevel` 过滤、字符串拼接语法 | ✅ |
 | [02-log-levels/docs](02-log-levels/docs/printk-output-path.md) | printk 输出链路 | ring buffer、`/dev/kmsg`、console vs 终端、为什么 SSH 里看不到 | ✅ |
-| 03-char-device | 字符设备 + `file_operations` | 主次设备号、`register_chrdev`、在 `/dev` 下冒出文件 | 待开始 |
-| 04-copy-to-user | 内核 ↔ 用户数据交换 | `copy_to_user` / `copy_from_user`、为什么要拷贝 | 待开始 |
-| 05-ioctl | 设备控制接口 | `unlocked_ioctl`、命令码编码 | 待开始 |
-| 06-mmap | 内存映射零拷贝 | `mmap`、`remap_pfn_range`、用户态直接访问设备内存 | 待开始 |
+| [03-module-param](03-module-param/README.md) | 模块参数 | `module_param` 三元组、权限位的真实含义、**为什么 root 也写不了 0444**、`module_param_cb` | ✅ |
+| 04-char-device | 字符设备 + `file_operations` | 主次设备号、`register_chrdev`、在 `/dev` 下冒出文件 | 待开始 |
+| 05-copy-to-user | 内核 ↔ 用户数据交换 | `copy_to_user` / `copy_from_user`、为什么要拷贝 | 待开始 |
+| 06-ioctl | 设备控制接口 | `unlocked_ioctl`、命令码编码 | 待开始 |
+| 07-mmap | 内存映射零拷贝 | `mmap`、`remap_pfn_range`、用户态直接访问设备内存 | 待开始 |
 
 **工具**（与主线和章节并列）：
 
@@ -176,6 +177,9 @@ kbuild 的规命令行以 Tab 开头，用空格会报 `missing separator`。
 | `KERN_INFO` 后面**不能加逗号**，它是字符串拼接不是参数 | [02-log-levels](02-log-levels/README.md) |
 | printk 不会出现在 SSH 终端里，得用 `dmesg -W` | [输出链路文档](02-log-levels/docs/printk-output-path.md) |
 | 树莓派默认 `console_loglevel` 是 `3 4 1 3`，比常见发行版更严格 | [02-log-levels](02-log-levels/README.md) |
+| 模块参数写 `0444` 时 **root 也写不了**：sysfs 有 kernfs 额外检查，不认 `CAP_DAC_OVERRIDE` | [03-module-param](03-module-param/README.md) |
+| 模块参数名打错**不报错**（返回码 0、无警告），配置静默失效 | [03-module-param](03-module-param/README.md) |
+| `echo` 写 `charp` 参数会把尾随换行一起存进内核字符串 | [03-module-param](03-module-param/README.md) |
 | Windows 写的代码传到 Linux 编不过，多半是 CRLF | 见上方 `.gitattributes` |
 
 ---

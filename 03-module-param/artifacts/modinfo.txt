@@ -1,0 +1,18 @@
+filename:       /home/wzp/LDD-/03-module-param/./param_demo.ko
+version:        0.1
+description:    Demo of module_param: types, permissions, array, and callback
+author:         wzp
+license:        GPL
+srcversion:     CA112547F063D32FFD115A2
+depends:        
+name:           param_demo
+vermagic:       6.18.34+rpt-rpi-2712 SMP preempt mod_unload modversions aarch64
+parm:           my_int:int, perm=0644: root writable, world readable (int)
+parm:           my_ro_int:int, perm=0444: world readable (Quiz) (int)
+parm:           my_hidden:int, perm=0: load-time only, invisible in sysfs (int)
+parm:           my_wo_int:int, perm=0200: write-only, even root cannot read it (int)
+parm:           my_bool:bool, perm=0644: accepts 1/0/y/n/Y/N (bool)
+parm:           my_str:charp, perm=0644: kernel strdup's it, do NOT kfree (charp)
+parm:           my_arr:int array, perm=0644: count is an OUTPUT param (array of int)
+parm:           my_ro_arr:int array, perm=0444 (array of int)
+parm:           cb_int:int, perm=0644 + custom set callback

@@ -1,0 +1,152 @@
+# ===============================================================
+# 03-module-param / experiments/param-perm  原始输出归档
+# 机器: wzp  aarch64
+# 内核: 6.18.34+rpt-rpi-2712
+date: extra operand ‘%H:%M:%S’
+Try 'date --help' for more information.
+# 日期: 
+# 复现: make && sudo insmod param_demo.ko 参数... && ./param_probe
+# ===============================================================
+
+########## 1. 带参数加载 ##########
+insmod 返回码=0
+
+########## 2. dmesg 初值 ##########
+[749308.884996] param_demo: === 加载：打印所有参数初值 ===
+[749308.885009] param_demo:   my_int    = 10   (0644, root 可写)
+[749308.885012] param_demo:   my_ro_int = 7   (0444, Quiz 主角)
+[749308.885018] param_demo:   my_hidden = 0   (perm=0, sysfs 里看不到)
+[749308.885021] param_demo:   my_wo_int = 3   (perm=0200, sysfs 里只能写)
+[749308.885024] param_demo:   my_bool   = 1
+[749308.885027] param_demo:   my_str    = "hello"
+[749308.885030] param_demo:   my_arr[3] = { 10 20 30 }
+[749308.885034] param_demo:   my_ro_arr[0] = { }
+[749308.885035] param_demo:   cb_int    = 0   (带 set 回调)
+[749308.885039] param_demo: === 提示：现在去 /sys/module/param_demo/parameters/ 改几个值，再 rmmod 看最终值 ===
+
+########## 3. sysfs 参数文件（注意 mode 位）##########
+total 0
+-rw-r--r-- 1 root root 16384 Sep  7 09:06 cb_int
+-rw-r--r-- 1 root root 16384 Sep  7 09:06 my_arr
+-rw-r--r-- 1 root root 16384 Sep  7 09:06 my_bool
+-rw-r--r-- 1 root root 16384 Sep  7 09:06 my_int
+-r--r--r-- 1 root root 16384 Sep  7 09:06 my_ro_arr
+-r--r--r-- 1 root root 16384 Sep  7 09:06 my_ro_int
+-rw-r--r-- 1 root root 16384 Sep  7 09:06 my_str
+--w------- 1 root root 16384 Sep  7 09:06 my_wo_int
+
+########## 4. modinfo 的 parm 段 ##########
+parm:           my_int:int, perm=0644: root writable, world readable (int)
+parm:           my_ro_int:int, perm=0444: world readable (Quiz) (int)
+parm:           my_hidden:int, perm=0: load-time only, invisible in sysfs (int)
+parm:           my_wo_int:int, perm=0200: write-only, even root cannot read it (int)
+parm:           my_bool:bool, perm=0644: accepts 1/0/y/n/Y/N (bool)
+parm:           my_str:charp, perm=0644: kernel strdup's it, do NOT kfree (charp)
+parm:           my_arr:int array, perm=0644: count is an OUTPUT param (array of int)
+parm:           my_ro_arr:int array, perm=0444 (array of int)
+parm:           cb_int:int, perm=0644 + custom set callback
+
+########## 5. param_probe（普通用户 uid=1000）##########
+════ sysfs 模块参数可写性探测 ════
+模块      : param_demo
+有效 UID  : 1000  (普通用户)
+
+参数      mode        读      写       说明
+---------------------------------------------------------------------------------
+my_int      -rw-r--r--  OK       EACCES    perm=0644 int，基线：应该能写
+my_ro_int   -r--r--r--  OK       EACCES    perm=0444 int，Quiz 主角
+my_hidden   (不存在) -        ENOENT    perm=0，预期 sysfs 里根本没有这个文件
+my_wo_int   --w-------  EACCES   EACCES    perm=0200 只写：root 也 cat 不出来
+my_bool     -rw-r--r--  OK       EACCES    perm=0644 bool
+my_str      -rw-r--r--  OK       EACCES    perm=0644 charp，内核会重新 strdup
+my_arr      -rw-r--r--  OK       EACCES    perm=0644 数组，逗号分隔
+my_ro_arr   -r--r--r--  OK       EACCES    perm=0444 数组
+cb_int      -rw-r--r--  OK       EACCES    module_param_cb，写了应该能看到内核日志
+
+=== 写入非法值时的真实 errno ===
+参数      写入值  errno      说明
+---------------------------------------------------------
+my_int      abc        Permission denied (打不开: int 参数收到非数字)
+my_int      99999999999999 Permission denied (打不开: int 溢出（超过 int 范围）)
+my_bool     2          Permission denied (打不开: bool 参数收到 0/1/y/n 之外的值)
+my_arr      1,2,3,4,5,6,7,8,9 Permission denied (打不开: 数组超过声明容量 8)
+
+提示：本程序要以【普通用户】和【sudo】各跑一次，对比 "写" 那一列。
+      root 那次如果 0444 的参数仍然显示 EACCES，就说明内核层面有额外检查；
+      如果显示 OK，就说明 CAP_DAC_OVERRIDE 绕过了文件 mode。
+
+########## 6. param_probe（root，sudo）##########
+════ sysfs 模块参数可写性探测 ════
+模块      : param_demo
+有效 UID  : 0  (root（带 CAP_DAC_OVERRIDE）)
+
+参数      mode        读      写       说明
+---------------------------------------------------------------------------------
+my_int      -rw-r--r--  OK       OK        perm=0644 int，基线：应该能写
+            原值 "10" → 写入 "1234" → 读回 "1234"
+my_ro_int   -r--r--r--  OK       EACCES    perm=0444 int，Quiz 主角
+my_hidden   (不存在) -        ENOENT    perm=0，预期 sysfs 里根本没有这个文件
+my_wo_int   --w-------  EACCES   OK        perm=0200 只写：root 也 cat 不出来
+            原值 "(不可读)" → 写入 "88" → 读回 "(不可读)"
+my_bool     -rw-r--r--  OK       OK        perm=0644 bool
+            原值 "Y" → 写入 "1" → 读回 "Y"
+my_str      -rw-r--r--  OK       OK        perm=0644 charp，内核会重新 strdup
+            原值 "hello" → 写入 "probe" → 读回 "probe"
+my_arr      -rw-r--r--  OK       OK        perm=0644 数组，逗号分隔
+            原值 "10,20,30" → 写入 "7,8" → 读回 "7,8"
+my_ro_arr   -r--r--r--  OK       EACCES    perm=0444 数组
+cb_int      -rw-r--r--  OK       OK        module_param_cb，写了应该能看到内核日志
+            原值 "0" → 写入 "4321" → 读回 "4321"
+
+=== 写入非法值时的真实 errno ===
+参数      写入值  errno      说明
+---------------------------------------------------------
+my_int      abc        EINVAL     int 参数收到非数字
+my_int      99999999999999 Numerical result out of range int 溢出（超过 int 范围）
+my_bool     2          EINVAL     bool 参数收到 0/1/y/n 之外的值
+my_arr      1,2,3,4,5,6,7,8,9 EINVAL     数组超过声明容量 8
+
+提示：本程序要以【普通用户】和【sudo】各跑一次，对比 "写" 那一列。
+      root 那次如果 0444 的参数仍然显示 EACCES，就说明内核层面有额外检查；
+      如果显示 OK，就说明 CAP_DAC_OVERRIDE 绕过了文件 mode。
+
+########## 7. Quiz 的 shell 版本 ##########
+--- 写 0644 的 my_int（root，应成功）---
+成功，读回: 555
+--- 写 0444 的 my_ro_int（root，Quiz）---
+sh: 1: cannot create /sys/module/param_demo/parameters/my_ro_int: Permission denied
+返回码=2
+读回: 7  <- 未变
+--- root cat 0200 的 my_wo_int（读位检查对称性）---
+cat: /sys/module/param_demo/parameters/my_wo_int: Permission denied
+返回码=1
+
+########## 8. 同一个 EINVAL，不同 shell 的说法 ##########
+  dash  : sh: 1: echo: echo: I/O error
+  bash  : /bin/bash: line 1: echo: write error: Invalid argument
+  (C 程序读到的真实 errno 见上面第 5/6 节的「写入非法值」表: EINVAL)
+
+########## 9. charp 的尾随换行（cat -A）##########
+  printf 写入(无换行): abc$
+  echo   写入(带换行): xyz$
+$
+  <- 第二组多一个空行，说明 \n 被存进了内核字符串
+
+########## 10. 非法输入（insmod 阶段）##########
+  my_int=abc            : insmod: ERROR: could not insert module param_demo.ko: Invalid parameters
+  my_bool=maybe         : insmod: ERROR: could not insert module param_demo.ko: Invalid parameters
+  my_arr 传 9 个(容量8) : insmod: ERROR: could not insert module param_demo.ko: Invalid parameters
+  nosuch=1 (名字不存在) :     返回码=0  <- 静默通过！lsmod:
+    模块已加载，计数=1
+
+########## 11. 卸载：最终值（证明 sysfs 改动真的落到了 C 变量）##########
+[749311.309298] param_demo: === 卸载：打印所有参数最终值（与加载时对比）===
+[749311.309309] param_demo:   my_int    = 0
+[749311.309312] param_demo:   my_ro_int = 7
+[749311.309316] param_demo:   my_hidden = 0
+[749311.309319] param_demo:   my_wo_int = 3
+[749311.309321] param_demo:   my_bool   = 0
+[749311.309324] param_demo:   my_str    = "default"
+[749311.309327] param_demo:   my_arr[0] = { }
+[749311.309331] param_demo:   my_ro_arr[0] = { }
+[749311.309334] param_demo:   cb_int    = 0

@@ -1,0 +1,21 @@
+# 编译中间产物
+*.o
+*.ko
+*.mod
+*.mod.c
+*.mod.o
+*.order
+*.symvers
+*.cmd
+.tmp_versions/
+Module.markers
+
+# 构建产物归档目录：默认忽略内容，再用 ! 保留指定的文本类产物
+artifacts/*
+!artifacts/
+!artifacts/*.txt
+!artifacts/*.log
+
+# 用户态实验程序的可执行文件
+# 注意：前导 / 是相对本 .gitignore 所在目录，不是仓库根
+experiments/*/param_probe
