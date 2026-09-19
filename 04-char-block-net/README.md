@@ -163,3 +163,51 @@ sniffing on wlan0 (idx=3), waiting for 5 packets...
 make clean        # 清模块与用户态二进制
 sudo rmmod ramdisk misc_echo   # 若还挂着
 ```
+
+## 6. 自测题：主/次设备号
+
+> 出题点全部来自本仓库实测现象：00 章的 nvme 分区、本章 ramdisk 的动态 major。
+
+### 题 1（静态预留 + 分区次号）
+
+在 Pi 上执行 `ls -l /dev/mmcblk0p2`，看到：
+
+```
+brw-rw---- 1 root disk 179, 2 ... /dev/mmcblk0p2
+```
+
+问：主号 179 定位到什么？次号 2 与 `mmcblk0`（179:0）是什么关系？
+为什么权限位前面的字符是 `b` 而不是 `c`？
+
+<details><summary>答案</summary>
+
+- 主号 179 → **mmc 块设备驱动**（内核官方静态预留段，见
+  `Documentation/admin-guide/devices.txt`）。
+- 次号 2 = `mmcblk0` 整盘（179:0）之后的**第 2 个分区**（即 `mmcblk0p2`）——
+  同一套驱动靠次号同时管理"整盘 + 各分区"，这正是"主号找驱动、次号找实例"的现场版。
+- `b` = block device，`c` = character device；`ls -l` 的第一个字符直接标注
+  该节点属于哪一类（00 章里 nvme 节点同样是 `b` 开头）。
+</details>
+
+### 题 2（动态主号 vs 静态预留）
+
+本章 ramdisk 加载后 `lsblk` 显示：
+
+```
+lxx-ramdisk 253:1    0     4M  0 disk
+```
+
+问：253 在内核官方静态表里查得到吗？
+"块设备主号固定"的老教材说法为什么现在要打折扣？
+卸载重载模块后 253 还会是 253 吗？
+
+<details><summary>答案</summary>
+
+- 查不到——253 是 `register_blkdev(0, ...)` 向内核**动态申请**的；
+  静态表只覆盖官方预留段（如 mmc 的 179、tty 的 4）。
+- 现代驱动大量走动态分配，主号不能硬编码进用户脚本/udev 规则，
+  应该现场读 `lsblk`、`/proc/devices` 或用 udev 的动态查询。
+- 不保证。动态号分配规则是"拿下一个可用的"，
+  取决于当时系统里其他动态驱动的占用情况，重载后可能变号。
+  （对照：misc_echo 的 major 永远是 10——misc 框架是静态预留的，变的只是 minor。）
+</details>
