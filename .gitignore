@@ -11,3 +11,7 @@ modules.order
 # Python 缓存（tools/ 和各章节实验脚本运行时产生）
 __pycache__/
 *.pyc
+
+# 用户态测试程序
+char/test_char
+net/sniff
