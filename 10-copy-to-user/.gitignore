@@ -1,0 +1,20 @@
+# 编译中间产物
+*.o
+*.ko
+*.mod
+*.mod.c
+*.mod.o
+*.order
+*.symvers
+*.cmd
+.tmp_versions/
+Module.markers
+
+# 默认忽略 artifacts/ 目录内容，但下面用 ! 否定规则保留指定产物
+artifacts/*
+
+# 允许提交的真机产物（构建产物归档，非预编译分发包 —— 见 01-first/.gitignore 的说明）
+!artifacts/
+!artifacts/*.ko
+!artifacts/*.log
+!artifacts/*.txt

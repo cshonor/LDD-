@@ -42,7 +42,7 @@
 | [07-list-head](07-list-head/README.md) | 内核侵入式双向链表 | `list_head` 嵌宿主、遍历游标、与 `container_of`/柔性数组的组合拳 | ✅ |
 | [08-gpio](08-gpio/README.md) | GPIO 引脚控制与中断 | Pi 5 RP1 南桥全局编号坑、GPIO 输出、GPIO 中断 | ✅ |
 | [09-irq-bottom-half](09-irq-bottom-half/README.md) | 中断下半部 | workqueue vs threaded_irq、中断上下文不能睡、一个模块参数切换两种姿势 | ✅ |
-| 10-copy-to-user | 内核 ↔ 用户数据交换 | `copy_to_user` / `copy_from_user`、为什么要拷贝 | 待开始 |
+| [10-copy-to-user](10-copy-to-user/README.md) | 为什么不能直接解引用用户指针 | 缺页/安全/PAN 三层理由、`access_ok` 只查范围、异常表兜底、直接解引用作死实验 | 🚧 初稿，待真机验证 |
 | 11-mmap | 内存映射零拷贝 | `mmap`、`remap_pfn_range`、用户态直接访问设备内存 | 待开始 |
 
 **工具**（与主线和章节并列）：
