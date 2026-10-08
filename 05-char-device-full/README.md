@@ -46,6 +46,43 @@ make && sudo insmod twodev.ko && sudo ./test_twodev
 sudo rmmod twodev
 ```
 
+## 补充：三个教程里没讲清的点
+
+### 1. 字符设备的"二次分派"：`def_chr_fops` → `chrdev_open`
+
+所有字符设备文件刚打开时 `file->f_op` 都指向**同一个**全局 fops（`def_chr_fops`，`fs/char_dev.c`）。
+它的 `.open` 即 `chrdev_open`，做的事：
+
+```
+chrdev_open()
+  ① 按 inode->i_rdev（设备号）到 cdev_map 哈希表查对应 cdev
+  ② filp->f_op = cdev->ops        ← 偷换成你注册的函数表
+  ③ try_module_get(cdev->owner)   ← .owner = THIS_MODULE 在这里生效
+  ④ 回调你的 .open
+```
+
+之后的 `read`/`write`/`ioctl` 直达你的函数。**所以内核认号不认名**：`mknod` 建出来的
+节点叫什么无所谓，`ls -l` 里那组 `major, minor` 才决定分给哪个驱动。
+`cdev_add` 的本质就是往这张"设备号 → cdev"的哈希表里登记。
+
+### 2. 老接口 `register_chrdev` 为什么不推荐
+
+| | 老接口 `register_chrdev(0, "x", &fops)` | 本章三件套 |
+|---|---|---|
+| 占用 | **一次吃掉主号下全部 256 个 minor** | `alloc_chrdev_region` 要几个申请几个 |
+| 内部 | 也包了一层 cdev，只是藏起来了 | 显式操作，语义清楚 |
+| /dev 节点 | 不管，要手工 mknod 或另配 class/device | `device_create` 一步带出 |
+
+新代码一律三件套；老接口只在演示代码和远古驱动里见。
+
+### 3. `class_create` 在 6.4 改过签名（老教程全错）
+
+老教程/老书的 `class_create(THIS_MODULE, "name")` 两个参数，在 **≥ 6.4** 的内核上
+直接编译失败：`error: too many arguments to function 'class_create'`。
+`THIS_MODULE` 形参已被移除（commit `1aaba11da9aa`
+*driver core: class: remove module * from class_create()*），只剩 `class_create("name")`。
+本章代码在 6.18.39 上就是单参数写法，实测通过。
+
 ## 衔接
 
 - 04 章的 misc_echo = 本章三件套的"简写"；06/07 章继续用 misc 但读端复杂化

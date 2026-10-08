@@ -36,10 +36,14 @@
 | [02-log-levels](02-log-levels/README.md) | printk 日志级别 | 8 个级别、`console_loglevel` 过滤、字符串拼接语法 | ✅ |
 | [02-log-levels/docs](02-log-levels/docs/printk-output-path.md) | printk 输出链路 | ring buffer、`/dev/kmsg`、console vs 终端、为什么 SSH 里看不到 | ✅ |
 | [03-module-param](03-module-param/README.md) | 模块参数 | `module_param` 三元组、权限位的真实含义、**为什么 root 也写不了 0444**、`module_param_cb` | ✅ |
-| 04-char-device | 字符设备 + `file_operations` | 主次设备号、`register_chrdev`、在 `/dev` 下冒出文件 | 待开始 |
-| 05-copy-to-user | 内核 ↔ 用户数据交换 | `copy_to_user` / `copy_from_user`、为什么要拷贝 | 待开始 |
-| 06-ioctl | 设备控制接口 | `unlocked_ioctl`、命令码编码 | 待开始 |
-| 07-mmap | 内存映射零拷贝 | `mmap`、`remap_pfn_range`、用户态直接访问设备内存 | 待开始 |
+| [04-char-block-net](04-char-block-net/README.md) | 字符/块/网络三类设备最小例子 | misc 一行注册、静态主号速查表、devtmpfs/sysfs/procfs 对比、**网络设备没有 /dev 节点** | ✅ |
+| [05-char-device-full](05-char-device-full/README.md) | 完整字符设备三件套 | `alloc_chrdev_region` + cdev + `device_create`、`private_data` + `container_of` 多实例、ioctl 三方向命令编码 | ✅ |
+| [06-kernel-memory](06-kernel-memory/README.md) | 内核内存分配 | kmalloc/kzalloc/vmalloc 地址特征与适用场景、GFP 标志 | ✅ |
+| [07-list-head](07-list-head/README.md) | 内核侵入式双向链表 | `list_head` 嵌宿主、遍历游标、与 `container_of`/柔性数组的组合拳 | ✅ |
+| [08-gpio](08-gpio/README.md) | GPIO 引脚控制与中断 | Pi 5 RP1 南桥全局编号坑、GPIO 输出、GPIO 中断 | ✅ |
+| [09-irq-bottom-half](09-irq-bottom-half/README.md) | 中断下半部 | workqueue vs threaded_irq、中断上下文不能睡、一个模块参数切换两种姿势 | ✅ |
+| 10-copy-to-user | 内核 ↔ 用户数据交换 | `copy_to_user` / `copy_from_user`、为什么要拷贝 | 待开始 |
+| 11-mmap | 内存映射零拷贝 | `mmap`、`remap_pfn_range`、用户态直接访问设备内存 | 待开始 |
 
 **工具**（与主线和章节并列）：
 
